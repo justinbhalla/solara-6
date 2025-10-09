@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Solara — Accept Invite</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root{ --accent:#4f46e5 }
+    html,body{height:100%}
+    body{font-family: ui-sans-serif, system-ui, -apple-system, "Inter", Segoe UI, Roboto, "Noto Sans", sans-serif}
+    .muted{color:#6b7280}
+    code.badge{background:#f3f4f6;border-radius:.375rem;padding:.125rem .375rem}
+  </style>
+</head>
+<body class="h-full bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+  <main class="min-h-full flex items-center justify-center p-6">
+    <div class="w-full max-w-md">
+      <div id="card" class="rounded-2xl border border-gray-200 dark:border-gray-800 p-6 shadow-sm bg-white dark:bg-gray-900">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="h-10 w-10 rounded-xl bg-indigo-600/10 text-indigo-600 flex items-center justify-center">🔷</div>
+          <div>
+            <h1 class="text-xl font-semibold">Accept your Solara invite</h1>
+            <p class="text-sm muted">We’ll get you into the workspace in a moment.</p>
+          </div>
+        </div>
+
+        <div id="status" class="text-sm">
+          Starting…
+        </div>
+
+        <div id="actions" class="mt-6 hidden">
+          <button id="openBtn" class="w-full px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500">Open workspace</button>
+          <button id="retryBtn" class="mt-2 w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800">Try again</button>
+        </div>
+      </div>
+
+      <p class="text-xs muted text-center mt-4">
+        If this keeps failing, ask the inviter to resend a fresh link or add your other email.
+      </p>
+    </div>
+  </main>
+
+<script>
+// ================= CONFIG =================
+const API_BASE = "https://shy-smoke-ab8e.justinbhalla28.workers.dev"; // Worker origin
+const apiUrl = (p) => API_BASE.replace(/\/+$/,'') + '/' + String(p||'').replace(/^\/+/,'');
+
+// ================ HELPERS =================
+const qs = k => new URL(location.href).searchParams.get(k);
+const setStatus = html => { document.getElementById('status').innerHTML = html };
+const showActions = ()=> document.getElementById('actions').classList.remove('hidden');
+function getSessionJWT(){
+  const m = document.cookie.match(/(?:^|; )(?:stytch_session_jwt|solara_session_jwt)=([^;]+)/);
+  return m ? decodeURIComponent(m[1]) : (localStorage.getItem('stytch_session_jwt') || localStorage.getItem('solara_session_jwt') || null);
+}
+function saveLastWS(ws){ try{ localStorage.setItem('solara_last_ws', ws) }catch{} }
+function escapeHtml(s=''){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c])) }
+
+async function ensureSession(){
+  let jwt = getSessionJWT();
+  if(!jwt){
+    const next = encodeURIComponent(location.href);
+    setStatus(`You need to sign in to accept this invite. Redirecting…`);
+    location.replace(`/sign-in.html?next=${next}`);
+    return null;
+  }
+  try{
+    const r = await fetch(apiUrl('auth/check'), { headers:{ 'Authorization':`Bearer ${jwt}` } });
+    if(!r.ok) throw 0;
+    return jwt;
+  }catch{
+    const next = encodeURIComponent(location.href);
+    setStatus(`Session expired. Redirecting to sign-in…`);
+    location.replace(`/sign-in.html?next=${next}`);
+    return null;
+  }
+}
+
+async function userAlreadyHasAccess(jwt, ws){
+  try{
+    const r = await fetch(apiUrl('workspaces'), { headers:{ 'Authorization':`Bearer ${jwt}` } });
+    if(!r.ok) return false;
+    const data = await r.json().catch(()=>({workspaces:[]}));
+    return !!(data.workspaces||[]).find(w => w.id === ws);
+  }catch{ return false }
+}
+
+// Old worker path: accepts with {workspace_id}
+async function acceptOldWorker(jwt, ws){
+  return await fetch(apiUrl('shares/accept'), {
+    method:'POST',
+    headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${jwt}` },
+    body: JSON.stringify({ workspace_id: ws })
+  });
+}
+
+// New worker path: accepts with {token}
+async function acceptNewWorker(jwt, token){
+  return await fetch(apiUrl('shares/accept'), {
+    method:'POST',
+    headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${jwt}` },
+    body: JSON.stringify({ token })
+  });
+}
+
+function goToWorkspace(ws){
+  if(ws){ saveLastWS(ws); location.replace(`/workspace.html?ws=${encodeURIComponent(ws)}`); }
+  else { location.replace('/workspace.html'); }
+}
+
+async function main(){
+  setStatus('Reading link…');
+  const ws = qs('ws');
+  const token = qs('token');
+  if(!ws && !token){
+    setStatus(`<span class="text-red-600">Invalid link.</span> Missing <code class="badge">ws</code> or <code class="badge">token</code> parameter.`);
+    showActions();
+    return;
+  }
+
+  const jwt = await ensureSession();
+  if(!jwt) return; // redirected already
+
+  // If they already have access, skip accept
+  if(ws){
+    setStatus('Checking workspace access…');
+    if(await userAlreadyHasAccess(jwt, ws)){
+      setStatus(`<span class="text-green-600">You already have access.</span> Opening workspace…`);
+      setTimeout(()=> goToWorkspace(ws), 350);
+      return;
+    }
+  }
+
+  // Try to accept using whichever parameters we have
+  let res, body;
+  try{
+    if(token){
+      setStatus('Accepting invite (token)…');
+      res = await acceptNewWorker(jwt, token);
+    } else {
+      setStatus('Accepting invite…');
+      res = await acceptOldWorker(jwt, ws);
+    }
+    body = await res.json().catch(()=>({}));
+  }catch(err){
+    setStatus(`<span class="text-red-600">Network error.</span> ${escapeHtml(String(err))}`);
+    showActions();
+    return;
+  }
+
+  if(res.ok){
+    const destWs = ws || body?.workspace_id || qs('ws') || localStorage.getItem('solara_last_ws') || '';
+    setStatus(`<span class="text-green-600">Success.</span> Redirecting to your workspace…`);
+    setTimeout(()=> goToWorkspace(destWs), 600);
+    return;
+  }
+
+  // Handle common errors cleanly
+  if(res.status === 404){
+    setStatus(`<span class="text-red-600">This invite is invalid or expired.</span><br/>Ask the workspace owner to resend a new invite link.`);
+  } else if(res.status === 401){
+    const next = encodeURIComponent(location.href);
+    setStatus(`Your session is not valid. Redirecting to sign-in…`);
+    location.replace(`/sign-in.html?next=${next}`);
+    return;
+  } else if(res.status === 400){
+    setStatus(`<span class="text-red-600">Bad request.</span><br/><code>${escapeHtml(JSON.stringify(body)||'400')}</code>`);
+  } else {
+    setStatus(`<span class="text-red-600">Could not accept invite.</span><br/><code>${escapeHtml(JSON.stringify(body)||('HTTP '+res.status))}</code>`);
+  }
+  showActions();
+}
+
+document.getElementById('retryBtn').onclick = main;
+document.getElementById('openBtn').onclick = ()=>{
+  const ws = qs('ws') || localStorage.getItem('solara_last_ws') || '';
+  goToWorkspace(ws);
+};
+
+document.addEventListener('DOMContentLoaded', main);
+</script>
+</body>
+</html>

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Solara — Finishing sign-in…</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>.card{box-shadow:0 1px 2px rgba(0,0,0,.06),0 8px 24px rgba(0,0,0,.06)}</style>
+</head>
+<body class="flex flex-col min-h-screen bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+<main class="flex-1 grid place-items-center px-6 py-12">
+<div class="w-full max-w-md text-center bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-6 card">
+<h2 class="text-2xl font-bold">Finishing up…</h2>
+<p id="status" class="mt-2 text-sm text-gray-600 dark:text-gray-300">Validating your sign-in…</p>
+<a id="manualLink" href="workspace.html" class="mt-6 inline-block px-5 py-3 rounded-xl bg-indigo-600 text-white disabled:opacity-50" aria-disabled="true">Continue</a>
+<pre id="debug" class="mt-4 text-left text-xs text-gray-500 dark:text-gray-400 whitespace-pre-wrap break-words"></pre>
+</div>
+</main>
+<script type="module">
+import { StytchHeadlessClient } from 'https://esm.sh/@stytch/vanilla-js/headless';
+const STYTCH_PUBLIC_TOKEN = 'public-token-test-835ccb5c-0edc-4206-98a0-8658bc2fa875';
+const stytch = new StytchHeadlessClient(STYTCH_PUBLIC_TOKEN);
+const params = new URLSearchParams(location.search);
+const NEXT = params.get('next') || sessionStorage.getItem('solara_next') || 'workspace.html';
+
+function setSessionCookie(jwt){
+const host = location.hostname;
+const https = location.protocol === 'https:';
+const parts = host.split('.');
+const hasDomain = parts.length >= 2;
+let cookie = `solara_session_jwt=${encodeURIComponent(jwt)}; Path=/; Max-Age=${60*60}; SameSite=Lax`;
+if (https) cookie += '; Secure';
+if (hasDomain && host !== 'localhost' && host !== '127.0.0.1') cookie += `; Domain=.${parts.slice(-2).join('.')}`;
+document.cookie = cookie;
+}
+function clearOld(){ try{ localStorage.removeItem('stytch_session_jwt'); localStorage.removeItem('stytch_user'); }catch{} try{ document.cookie = 'solara_session_jwt=; Path=/; Max-Age=0'; }catch{} }
+function showError(err){ const statusEl=document.getElementById('status'); const debugEl=document.getElementById('debug'); statusEl.textContent='Authentication failed.'; const obj=(err&&err.error)?err:{message:err?.message||String(err)}; debugEl.textContent=JSON.stringify(obj,null,2); document.getElementById('manualLink').removeAttribute('aria-disabled'); }
+async function finalize(){
+clearOld();
+const token = params.get('token');
+const tokenType = params.get('stytch_token_type');
+if (!token){ showError({ message: 'Missing token in callback URL.' }); return; }
+try{
+let authRes;
+if (tokenType && tokenType.startsWith('magic_links')) authRes = await stytch.magicLinks.authenticate(token, { session_duration_minutes: 60 });
+else authRes = await stytch.oauth.authenticate(token, { session_duration_minutes: 60 });
+const jwt = authRes.session_jwt;
+localStorage.setItem('stytch_session_jwt', jwt);
+localStorage.setItem('stytch_user', JSON.stringify(authRes.user || null));
+setSessionCookie(jwt);
+location.replace(NEXT);
+} catch (e){ showError(e); }
+}
+finalize();
+</script>
+</body>
+</html>

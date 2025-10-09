@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Solara – Reports</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <style>
+    .menu-card { box-shadow: 0 10px 20px rgba(0,0,0,.08); }
+    .card{box-shadow:0 1px 2px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.06)}
+  </style>
+</head>
+<body class="flex flex-col min-h-screen bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-sans">
+
+  <!-- Workspace hint banner (only shows if no ws param found) -->
+  <div id="wsBanner" class="hidden bg-amber-50 text-amber-900 border-b border-amber-200 px-6 py-2 text-sm">
+    No workspace selected. <a class="underline font-medium" href="workspace.html">Go to Workspaces</a>
+  </div>
+
+  <!-- Header (EXACT copy of Solara header) -->
+  <header class="flex justify-between items-center px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+    <div class="flex items-center gap-3">
+      <!-- Indigo icon linking back to the Workspace hub -->
+      <a href="workspace.html" class="w-9 h-9 rounded-xl bg-indigo-600/10 text-indigo-600 flex items-center justify-center hover:bg-indigo-600/20" title="Back to Workspaces">🔷</a>
+      <div>
+        <h1 class="text-3xl font-bold tracking-tight">Solara</h1>
+        <p class="text-sm text-gray-500 dark:text-gray-400">Part of the ZLG Product Suite</p>
+      </div>
+    </div>
+
+    <!-- Signed-in user -->
+    <div id="userArea" class="relative">
+      <button id="userButton" class="flex items-center gap-2 px-3 py-2 rounded-full border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 transition">
+        <span id="avatar" class="inline-flex h-7 w-7 items-center justify-center rounded-full bg-indigo-600 text-white text-xs font-semibold">?</span>
+        <span id="userName" class="text-sm font-medium">User</span>
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-70" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z" clip-rule="evenodd"/></svg>
+      </button>
+      <div id="userMenu" class="hidden absolute right-0 mt-2 w-56 rounded-xl menu-card bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 overflow-hidden">
+        <div class="px-4 py-3 text-sm">
+          <div id="userEmail" class="text-gray-600 dark:text-gray-300"></div>
+        </div>
+        <div class="border-t border-gray-100 dark:border-gray-700"></div>
+        <button id="addUserBtn" class="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-700">Add user…</button>
+        <button id="signOutBtn" class="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20">Sign out</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Nav: left = section tabs, right = actions (EXACT Solara dimensions/styles) -->
+  <nav class="flex items-center justify-between px-6 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm font-medium">
+    <div class="flex items-center gap-6">
+      <button onclick="goTasks()" class="flex items-center gap-2 text-gray-700 dark:text-gray-200 hover:text-indigo-600">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M3 3h14v2H3V3zm0 4h9v2H3V7zm0 4h14v2H3v-2zm0 4h9v2H3v-2z"/></svg>
+        <span>Tasks</span>
+      </button>
+      <button class="flex items-center gap-2 text-indigo-600 dark:text-indigo-400 font-semibold">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3v18h18M7 16v-4m4 4V8m4 8V5"/></svg>
+        <span>Reports</span>
+      </button>
+    </div>
+    <div class="flex items-center gap-3">
+      <!-- Trash (exact SVG + classes from Solara nav) -->
+      <button
+        onclick="clearReports()"
+        title="Clear extra blocks"
+        class="p-2 rounded-full bg-red-100 text-red-600 hover:bg-red-200 transition-all">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m0 0A2.99 2.99 0 017 6h10a2.99 2.99 0 012.418 3H19v10a2 2 0 01-2 2H7a2 2 0 01-2-2V9h.582zM10 11v6m4-6v6"/>
+        </svg>
+      </button>
+      <!-- Add report block (identical size/shape to Solara “newTaskBtn”) -->
+      <button
+        onclick="addReportBlock()"
+        id="addReportBtn"
+        class="px-4 py-1.5 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-500 shadow transition"
+        title="Add report block">+</button>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <main class="p-6 flex-1 overflow-y-auto">
+    <div id="report-area" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <!-- Completion Rate -->
+      <div class="bg-white dark:bg-gray-800 p-6 rounded-xl card">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-lg font-semibold">Completion Rate</h3>
+          <svg class="h-6 w-6 text-green-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path d="M3 12l2 2 4-4m2 10h6a2 2 0 0 0 2-2v-5" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M17 8h2a2 2 0 0 1 2 2v0a2 2 0 0 1-2 2h-2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">Percentage of completed tasks across all tabs.</p>
+        <div class="text-4xl font-bold text-green-500 text-center" id="completionRate">--%</div>
+      </div>
+
+      <!-- Task Status -->
+      <div class="bg-white dark:bg-gray-800 p-6 rounded-xl card">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-lg font-semibold">Task Status</h3>
+        </div>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">Breakdown by current state (all tabs).</p>
+        <ul class="space-y-2 text-sm font-medium">
+          <li class="flex justify-between text-gray-800 dark:text-gray-200"><span>To Do</span><span id="todoCount">--</span></li>
+          <li class="flex justify-between text-yellow-600"><span>In Progress</span><span id="inprogressCount">--</span></li>
+          <li class="flex justify-between text-green-600"><span>Done</span><span id="doneCount">--</span></li>
+          <li class="flex justify-between text-indigo-600 font-semibold"><span>Total</span><span id="totalCount">--</span></li>
+        </ul>
+      </div>
+    </div>
+  </main>
+
+  <!-- Bottom rail (export right) – same as Solara -->
+  <div class="sticky bottom-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 z-50">
+    <div class="flex items-center justify-between px-6 py-3">
+      <span class="text-sm text-gray-500 dark:text-gray-400"></span>
+      <button onclick="exportReportsAsPDF()" class="p-2 rounded-full hover:bg-indigo-100 text-indigo-600 transition" title="Download Report PDF">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 16l4-5h-3V4h-2v7H8l4 5zm-7 4h14v-2H5v2z"/></svg>
+      </button>
+    </div>
+    <footer class="text-center text-xs text-gray-500 dark:text-gray-400 px-6 py-3 border-t border-gray-200 dark:border-gray-700">© 2025 ZenLock Group (ZLG). All rights reserved.</footer>
+  </div>
+
+<script>
+/*************************
+ *  CONFIG               *
+ *************************/
+const API_BASE = "https://shy-smoke-ab8e.justinbhalla28.workers.dev";
+const apiUrl = (p) => API_BASE.replace(/\/+$/, '') + '/' + String(p||'').replace(/^\/+/, '');
+
+/**************
+ *  STATE     *
+ **************/
+let WORKSPACE_ID = '';
+let sessionJWT = null;
+let authedUser = null;
+let currentUserKey = null;
+let tabData = {};
+
+/*******************
+ *  UTILITIES       *
+ *******************/
+function getSessionJWT(){
+  const m = document.cookie.match(/(?:^|; )(?:stytch_session_jwt|solara_session_jwt)=([^;]+)/);
+  return m ? decodeURIComponent(m[1]) : (localStorage.getItem('stytch_session_jwt') || localStorage.getItem('solara_session_jwt') || null);
+}
+function storageKey(){
+  const uid = currentUserKey || 'anon';
+  const wid = WORKSPACE_ID || 'local';
+  return `solara:tabs:${uid}:${wid}`;
+}
+function loadTabsFromStorage(){
+  try{ const raw = localStorage.getItem(storageKey()); return raw ? JSON.parse(raw) : {}; }catch{ return {}; }
+}
+function saveTabsToStorage(){ try{ localStorage.setItem(storageKey(), JSON.stringify(tabData)); }catch{} }
+function initialsFor(user){
+  const full = ((user?.name?.first_name||'') + ' ' + (user?.name?.last_name||'')).trim();
+  const fromName = full.split(/\s+/).filter(Boolean).slice(0,2).map(s=>s[0]).join('');
+  if(fromName) return fromName.toUpperCase();
+  const email = user?.email_addresses?.[0]?.email_address || '?';
+  return email.slice(0,2).toUpperCase();
+}
+function displayNameFor(user){
+  const parts = [user?.name?.first_name, user?.name?.last_name].filter(Boolean);
+  if (parts.length) return parts.join(' ');
+  return user?.email_addresses?.[0]?.email_address || initialsFor(user);
+}
+
+/*******************
+ *  AUTH            *
+ *******************/
+function requireReauth(){
+  try{
+    localStorage.setItem('solara_last_ws', WORKSPACE_ID || localStorage.getItem('solara_last_ws') || 'local');
+  }catch{}
+  location.replace('/sign-in.html');
+}
+function hydrateFromAuthCheckPayload(data){
+  const full = (data?.name||'').trim();
+  const parts = full ? full.split(/\s+/) : [];
+  const first = parts[0] || '';
+  const last  = parts.slice(1).join(' ') || '';
+  const email = data?.email || '';
+  const uid   = data?.user_id || email || 'anon';
+  currentUserKey = uid;
+  return { name:{ first_name:first, last_name:last }, email_addresses: email ? [{ email_address: email }] : [] };
+}
+function updateAuthUI(){
+  const avatar = document.getElementById('avatar');
+  const nameEl = document.getElementById('userName');
+  const emailEl = document.getElementById('userEmail');
+  const u = authedUser || { name:{}, email_addresses:[] };
+  avatar.textContent = initialsFor(u);
+  nameEl.textContent = displayNameFor(u) || 'User';
+  emailEl.textContent = u?.email_addresses?.[0]?.email_address || '';
+}
+function wireAuthButtons(){
+  document.getElementById('userButton').onclick = () => document.getElementById('userMenu').classList.toggle('hidden');
+  document.addEventListener('click', (e)=>{
+    const m = document.getElementById('userMenu');
+    const b = document.getElementById('userButton');
+    if(!m.classList.contains('hidden') && !m.contains(e.target) && !b.contains(e.target)) m.classList.add('hidden');
+  });
+  document.getElementById('addUserBtn').onclick = async () => {
+    const email = prompt('Invite a user by email:');
+    if(!email) return;
+    if(!sessionJWT) return requireReauth();
+    try{
+      const res = await fetch(apiUrl('shares'), {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${sessionJWT}` },
+        body: JSON.stringify({ email, workspace_id: WORKSPACE_ID||null })
+      });
+      if(res.ok) alert('Invitation sent.'); else alert('Invite failed: ' + (await res.text()));
+    }catch(err){ alert('Invite error: ' + err.message); }
+  };
+  document.getElementById('signOutBtn').onclick = async () => {
+    try{ if(sessionJWT){ await fetch(apiUrl('logout'), { method:'POST', headers:{ 'Authorization':`Bearer ${sessionJWT}` } }).catch(()=>{}); } }
+    finally{ requireReauth(); }
+  };
+}
+async function verifySessionAndHydrate(){
+  sessionJWT = getSessionJWT();
+  authedUser = JSON.parse(localStorage.getItem('stytch_user') || 'null');
+  if(!sessionJWT) return false;
+
+  updateAuthUI();
+
+  try{
+    const res = await fetch(apiUrl('auth/check'), { headers:{ 'Authorization':`Bearer ${sessionJWT}` } });
+    if(!res.ok){ return false; }
+    const data = await res.json();
+    const fresh = hydrateFromAuthCheckPayload(data);
+    if(!authedUser || (!authedUser.name && (!authedUser.email_addresses||!authedUser.email_addresses.length))){
+      authedUser = fresh; localStorage.setItem('stytch_user', JSON.stringify(authedUser));
+    } else {
+      if (fresh.email_addresses?.[0]?.email_address && !authedUser.email_addresses?.length){ authedUser.email_addresses = fresh.email_addresses; }
+      if ((fresh.name?.first_name||fresh.name?.last_name) && !(authedUser.name?.first_name||authedUser.name?.last_name)) authedUser.name = fresh.name;
+      localStorage.setItem('stytch_user', JSON.stringify(authedUser));
+    }
+    updateAuthUI();
+    return true;
+  }catch(err){
+    return !!authedUser;
+  }
+}
+
+/*******************
+ *  CLOUD LOAD       *
+ *******************/
+async function loadTabsFromCloud(){
+  if(!sessionJWT || !WORKSPACE_ID) return false;
+  try{
+    const url = apiUrl('tasks') + `?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`;
+    const res = await fetch(url, { headers:{ 'Authorization':`Bearer ${sessionJWT}` } });
+    if(res.status === 401) return false;
+    if(res.ok){ const data = await res.json(); if(data && data.tabs){ tabData = data.tabs; saveTabsToStorage(); return true; } }
+  }catch(err){}
+  return false;
+}
+
+/*******************
+ *  METRICS          *
+ *******************/
+function getAllTasks(){
+  const out = [];
+  const tabs = tabData || {};
+  Object.keys(tabs).forEach(tabName => {
+    ['todo','inprogress','done'].forEach(status => {
+      (tabs[tabName]?.[status]||[]).forEach(task => {
+        out.push({ ...task, status, tab: tabName });
+      });
+    });
+  });
+  return out;
+}
+function computeMetrics(){
+  const tasks = getAllTasks();
+  const now = new Date();
+  let total=tasks.length, todo=0, inprogress=0, done=0, overdue=0;
+  const priority = { High:0, Medium:0, Low:0 };
+  let ageSum = 0;
+  tasks.forEach(t => {
+    if (t.status==='todo') todo++; else if (t.status==='inprogress') inprogress++; else if (t.status==='done') done++;
+    const p = t.priority || 'Medium'; if(priority[p]!==undefined) priority[p]++;
+    if (t.status!=='done' && t.dueDate){ const d = new Date(t.dueDate); if(!isNaN(d) && d < now) overdue++; }
+    const m = String(t.id||'').match(/task-(\d+)/);
+    if(m){ const created = new Date(parseInt(m[1],10)); if(!isNaN(created)) ageSum += (now - created)/(1000*60*60*24); }
+  });
+  const completionRate = total ? Math.round((done/total)*100) : 0;
+  const avgAge = total ? Math.round(ageSum/Math.max(total,1)) : 0;
+  return { total, todo, inprogress, done, completionRate, overdue, avgAge, priority };
+}
+function paintCards(){
+  const m = computeMetrics();
+  const el = (id) => document.getElementById(id);
+  el('todoCount').textContent = m.todo;
+  el('inprogressCount').textContent = m.inprogress;
+  el('doneCount').textContent = m.done;
+  el('totalCount').textContent = m.total;
+  el('completionRate').textContent = m.completionRate + '%';
+
+  document.querySelectorAll('#report-area .card').forEach(card => {
+    const title = card.querySelector('h3')?.textContent?.trim();
+    if(title==='Overdue Tasks'){
+      const kpi = card.querySelector('[data-kpi]'); if(kpi) kpi.textContent = m.overdue;
+    }else if(title==='Avg Task Age'){
+      const kpi = card.querySelector('[data-kpi]'); if(kpi) kpi.textContent = m.avgAge + 'd';
+    }else if(title==='Priority Distribution'){
+      const spans = card.querySelectorAll('[data-pri]');
+      if(spans.length>=3){ spans[0].textContent = m.priority.High; spans[1].textContent = m.priority.Medium; spans[2].textContent = m.priority.Low; }
+    }
+  });
+}
+
+/*******************
+ *  REPORT BLOCKS    *
+ *******************/
+const predefinedReports = [
+  { title:'Overdue Tasks', desc:'Tasks past their due date across tabs.', icon:`<svg class="h-6 w-6 text-red-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`, body:`<div class="text-2xl font-bold text-red-500 text-center" data-kpi>--</div>` },
+  { title:'Avg Task Age', desc:'Average duration since task creation.', icon:`<svg class="h-6 w-6 text-yellow-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`, body:`<div class="text-2xl font-bold text-yellow-500 text-center" data-kpi>--</div>` },
+  { title:'Priority Distribution', desc:'Tasks grouped by priority across all tabs.', icon:`<svg class="h-6 w-6 text-purple-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>`, body:`<ul class="text-sm font-medium space-y-1 text-gray-800 dark:text-gray-200"><li class="flex justify-between"><span>High</span><span data-pri>--</span></li><li class="flex justify-between"><span>Medium</span><span data-pri>--</span></li><li class="flex justify-between"><span>Low</span><span data-pri>--</span></li></ul>` }
+];
+
+function addReportBlock(){
+  const area = document.getElementById('report-area');
+  const existing = Array.from(area.children).map(el => el.querySelector('h3')?.textContent?.trim());
+  const next = predefinedReports.find(r => !existing.includes(r.title));
+  if(!next){ alert('All predefined reports are already added.'); return; }
+  const card = document.createElement('div');
+  card.className = 'bg-white dark:bg-gray-800 p-6 rounded-xl card';
+  card.innerHTML = `<div class="flex items-center justify-between mb-3"><h3 class="text-lg font-semibold">${next.title}</h3>${next.icon}</div><p class="text-sm text-gray-500 dark:text-gray-400 mb-4">${next.desc}</p>${next.body}`;
+  area.appendChild(card);
+  paintCards();
+}
+function clearReports(){
+  const area = document.getElementById('report-area');
+  while(area.children.length>2){ area.removeChild(area.lastElementChild); }
+}
+
+/*******************
+ *  NAV              *
+ *******************/
+function goTasks(){
+  const url = new URL('solara.html', location.origin);
+  if (WORKSPACE_ID) url.searchParams.set('ws', WORKSPACE_ID);
+  location.href = url.toString();
+}
+
+/*******************
+ *  EXPORT           *
+ *******************/
+function exportReportsAsPDF(){
+  const element = document.getElementById('report-area');
+  if(!element) return alert('No report area found.');
+  html2pdf().set({ margin:.5, filename:'Solara-Report.pdf', image:{ type:'jpeg', quality:.98 }, html2canvas:{ scale:2 }, jsPDF:{ unit:'in', format:'letter', orientation:'portrait' } }).from(element).save();
+}
+
+/*******************
+ *  BOOT             *
+ *******************/
+function maybeAttachLastWorkspace(){
+  const url = new URL(location.href);
+  if (url.searchParams.get('ws')) return;
+  const last = localStorage.getItem('solara_last_ws');
+  if (last){ url.searchParams.set('ws', last); history.replaceState(null,'',url.toString()); }
+}
+
+window.addEventListener('DOMContentLoaded', async () => {
+  maybeAttachLastWorkspace();
+  const url = new URL(location.href);
+  WORKSPACE_ID = url.searchParams.get('ws') || '';
+  if(!WORKSPACE_ID){ document.getElementById('wsBanner').classList.remove('hidden'); }
+
+  const ok = await verifySessionAndHydrate();
+  if(!ok) return requireReauth();
+  wireAuthButtons();
+
+  tabData = loadTabsFromStorage();
+  paintCards();
+
+  const loaded = await loadTabsFromCloud();
+  if(loaded){ try{ localStorage.setItem('solara_last_sync', Date.now()); }catch{} paintCards(); }
+});
+</script>
+</body>
+</html>
