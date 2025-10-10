@@ -1,4 +1,7 @@
-<!-- Solara v10.2 — smooth sync (retain all UI/UX/features) — PART 1 of 2 -->
+<!-- Solara v10.3 — smooth sync + auth-loop hardening — PART 1 of 2 (HTML/CSS + core JS)
+- Includes: layout, styles, data model, presence, tasks, members UI, HTTP + WS helpers.
+- Excludes: boot + event wiring (provided in Part 2). Paste Part 2's <script> just before </body>.
+-->
 <!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
@@ -25,6 +28,16 @@
 <!-- Workspace notice -->
 <div id="wsBanner" class="hidden bg-amber-50 text-amber-900 border-b border-amber-200 px-6 py-2 text-sm">
   No workspace selected. <a class="underline font-medium" href="workspace.html">Go to Workspaces</a>
+</div>
+<!-- Auth required banner (prevents redirect loops) -->
+<div id="authRequired" class="hidden bg-amber-100/70 text-amber-900 border-b border-amber-300 px-6 py-3 text-sm flex items-center justify-between">
+  <div>
+    You're signed out or your session expired. Please sign in to use collaboration and sync features.
+  </div>
+  <div class="flex items-center gap-2">
+    <button id="signInNowBtn" class="px-3 py-1.5 rounded bg-indigo-600 text-white text-sm hover:bg-indigo-500">Sign in</button>
+    <button id="continueViewerBtn" class="px-3 py-1.5 rounded border border-amber-300 text-amber-900 text-sm hover:bg-amber-200/50">Continue in viewer mode</button>
+  </div>
 </div>
 
 <!-- Header -->
@@ -110,7 +123,7 @@
     <div class="flex items-center gap-2 w-full overflow-x-auto px-1 py-1">
       <div id="tabs" class="flex gap-2 min-w-max"></div>
       <button id="addTabBtn" title="Add Tab" class="p-2 rounded-full bg-green-100 hover:bg-green-200 text-green-700 transition duration-150 shadow-sm border border-green-200">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 4v16m8-8H4"/></svg>
       </button>
     </div>
     <div class="flex items-center gap-1">
@@ -129,7 +142,7 @@
   </footer>
 </div>
 
-<!-- Members Modal (unchanged behavior) -->
+<!-- Members Modal -->
 <div id="membersModal" class="hidden fixed inset-0 z-[60] flex items-center justify-center">
   <div class="absolute inset-0 bg-black/40" onclick="closeMembers()"></div>
   <div class="relative w-full max-w-lg rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-5 shadow-xl">
@@ -147,12 +160,13 @@
   </div>
 </div>
 
+<!-- CORE SCRIPT (everything except boot + event wiring) -->
 <script>
-/* ---------------- CONFIG ---------------- */
-const API_BASE = "https://shy-smoke-ab8e.justinbhalla28.workers.dev";
-const apiUrl = p => API_BASE.replace(/\/+$/,'') + '/' + String(p||'').replace(/^\/+/,'');
+/*********************** CONFIG ***********************/
+const API_BASE = "https://shy-smoke-ab8e.justinbhalla28.workers.dev"; // stable v10 worker
+const apiUrl = p => API_BASE.replace(/\/+$/,'') + '/' + String(p||'').replace(/^\/+,'');
 
-/* ---------------- STATE ---------------- */
+/*********************** STATE ***********************/
 let WORKSPACE_ID = '';
 let WORKSPACE_NAME = '';
 let sessionJWT = null;
@@ -179,9 +193,26 @@ let isDragging = false;
 let editingTasks = new Set();
 let hasRemoteDuringEdit = false;
 
-/* ---------------- UTIL ---------------- */
+/*********************** UTIL ***********************/
 const debounce = (fn, ms=400)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; };
+function setCookie(name, value, opts={}){
+  const parts=[`${name}=${encodeURIComponent(value)}`];
+  parts.push(`Path=${opts.path||'/'}`);
+  if(opts.maxAge) parts.push(`Max-Age=${opts.maxAge}`);
+  parts.push('SameSite=Lax');
+  if(location.protocol==='https:') parts.push('Secure');
+  document.cookie = parts.join('; ');
+}
+function delCookie(name){ document.cookie = `${name}=; Path=/; Max-Age=0; SameSite=Lax`; }
 function getSessionJWT(){
+  const url = new URL(location.href);
+  // 1) Accept token from URL (?token=...) to break redirect loops after sign-in
+  const tokenParam = url.searchParams.get('token');
+  if(tokenParam){
+    try{ localStorage.setItem('solara_session_jwt', tokenParam); setCookie('solara_session_jwt', tokenParam, { maxAge: 60*60*24*30 }); }catch{}
+    url.searchParams.delete('token'); history.replaceState({}, '', url.toString());
+  }
+  // 2) Read cookie or localStorage
   const m = document.cookie.match(/(?:^|; )(?:stytch_session_jwt|solara_session_jwt)=([^;]+)/);
   return m ? decodeURIComponent(m[1]) : (localStorage.getItem('stytch_session_jwt') || localStorage.getItem('solara_session_jwt') || null);
 }
@@ -189,63 +220,58 @@ function initials(name,email){ const parts=(name||'').trim().split(/\s+/).filter
 function normalizeDateString(v){ if(!v) return ''; if(/^\d{4}-\d{2}-\d{2}$/.test(v)) return v; const d=new Date(v); if(isNaN(d)) return ''; const tz=d.getTimezoneOffset()*60000; return new Date(d.getTime()-tz).toISOString().slice(0,10); }
 function stampSync(){ lastSyncedAt = new Date(); document.getElementById('lastSynced').textContent = 'Last synced: ' + lastSyncedAt.toLocaleTimeString(); }
 
-/* ---------------- AUTH ---------------- */
+/*********************** AUTH ***********************/
+const REDIRECT_GUARD_KEY = 'solara_signin_guard_at';
+const REDIRECT_GUARD_TTL = 15_000; // ms
+function markRedirectGuard(){ try{ localStorage.setItem(REDIRECT_GUARD_KEY, String(Date.now())); }catch{} }
+function recentRedirectGuard(){ try{ const t=+localStorage.getItem(REDIRECT_GUARD_KEY)||0; return (Date.now()-t)<REDIRECT_GUARD_TTL; }catch{return false} }
+function clearRedirectGuard(){ try{ localStorage.removeItem(REDIRECT_GUARD_KEY); }catch{} }
+
 function displayNameFor(u){ const f=u?.name?.first_name, l=u?.name?.last_name, e=u?.email_addresses?.[0]?.email_address; return [f,l].filter(Boolean).join(' ') || e || 'User'; }
-function updateAuthUI(){
-  const name=displayNameFor(authedUser);
-  const email=authedUser?.email_addresses?.[0]?.email_address||'';
-  document.getElementById('avatar').textContent = initials(name,email);
-  document.getElementById('userName').textContent = name;
-  document.getElementById('userEmail').textContent = email;
-}
+function updateAuthUI(){ const name=displayNameFor(authedUser); const email=authedUser?.email_addresses?.[0]?.email_address||''; document.getElementById('avatar').textContent = initials(name,email); document.getElementById('userName').textContent = name; document.getElementById('userEmail').textContent = email; }
+
 async function verifySessionAndHydrate(){
   sessionJWT = getSessionJWT();
   if(!sessionJWT) return false;
   try{
     const r = await fetch(apiUrl('auth/check'), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }});
-    if(!r.ok) return false;
+    if(!r.ok){ if(r.status===401 || r.status===403){ try{ delCookie('stytch_session_jwt'); delCookie('solara_session_jwt'); localStorage.removeItem('stytch_session_jwt'); localStorage.removeItem('solara_session_jwt'); }catch{} }
+      return false;
+    }
     const data = await r.json();
     currentUserKey = data.user_id;
     const email = data.email ? [{ email_address: data.email }] : [];
-    const parts = (data.name||'').split(/\s+/); authedUser = { name:{ first_name:parts[0]||'', last_name:parts.slice(1).join(' ')||'' }, email_addresses: email };
+    const parts = (data.name||'').split(/\s+/);
+    authedUser = { name:{ first_name:parts[0]||'', last_name:parts.slice(1).join(' ')||'' }, email_addresses: email };
     localStorage.setItem('stytch_user', JSON.stringify(authedUser));
-    updateAuthUI();
+    updateAuthUI(); clearRedirectGuard();
     return true;
   }catch{ return false; }
 }
 
-/* ---------------- MEMBERS / SHARES ---------------- */
-async function fetchRole(){ const r=await fetch(apiUrl(`workspaces/${encodeURIComponent(WORKSPACE_ID)}/role`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}); if(!r.ok) return 'viewer'; const j=await r.json().catch(()=>({})); return j.role||'viewer'; }
-async function listShares(){ const r=await fetch(apiUrl(`shares?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}); if(!r.ok) return []; const j=await r.json().catch(()=>({shares:[]})); return j.shares||[]; }
-async function invite(email){ return fetch(apiUrl('shares'), { method:'POST', headers:{'Authorization':`Bearer ${sessionJWT}`,'Content-Type':'application/json'}, body: JSON.stringify({ workspace_id: WORKSPACE_ID, email }) }); }
-async function patchShareRole(id, role){ return fetch(apiUrl(`shares/${id}`), { method:'PATCH', headers:{'Authorization':`Bearer ${sessionJWT}`,'Content-Type':'application/json'}, body: JSON.stringify({ role }) }); }
-async function removeShare(id){ return fetch(apiUrl(`shares/${id}`), { method:'DELETE', headers:{'Authorization':`Bearer ${sessionJWT}`}}); }
-async function transferOwner(toEmail){ return fetch(apiUrl(`workspaces/${encodeURIComponent(WORKSPACE_ID)}/transfer_owner`), { method:'POST', headers:{'Authorization':`Bearer ${sessionJWT}`,'Content-Type':'application/json'}, body: JSON.stringify({ to_email: toEmail }) }); }
+function signInUrl(){ const here = location.pathname + location.search + location.hash; const u = new URL('sign-in.html', location.origin); u.searchParams.set('return', here); return u.toString(); }
+function showAuthRequired(){ const bar=document.getElementById('authRequired'); bar.classList.remove('hidden'); const btn=document.getElementById('signInNowBtn'); btn.onclick=()=>{ markRedirectGuard(); location.href = signInUrl(); }; const view=document.getElementById('continueViewerBtn'); view.onclick=()=>{ currentRole='viewer'; document.getElementById('authRequired').classList.add('hidden'); } }
 
-/* ---------------- TABS LOAD/SAVE ---------------- */
-async function fetchTabs(){ const r=await fetch(apiUrl(`tasks?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}); if(!r.ok) return {}; const j=await r.json().catch(()=>({tabs:{}})); return j.tabs||{}; }
-async function saveTabsHTTP(tabs){ await fetch(apiUrl('tasks'), { method:'POST', headers:{'Authorization':`Bearer ${sessionJWT}`,'Content-Type':'application/json'}, body: JSON.stringify({ workspace_id: WORKSPACE_ID, tabs }) }); }
+/*********************** MEMBERS / SHARES ***********************/
+async function fetchRole(){ if(!sessionJWT) return 'viewer'; const r=await fetch(apiUrl(`workspaces/${encodeURIComponent(WORKSPACE_ID)}/role`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}); if(!r.ok) return 'viewer'; const j=await r.json().catch(()=>({})); return j.role||'viewer'; }
+async function listShares(){ if(!sessionJWT) return []; const r=await fetch(apiUrl(`shares?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}); if(!r.ok) return []; const j=await r.json().catch(()=>({shares:[]})); return j.shares||[]; }
+async function invite(email){ if(!sessionJWT) throw new Error('Not authed'); return fetch(apiUrl('shares'), { method:'POST', headers:{'Authorization':`Bearer ${sessionJWT}`,'Content-Type':'application/json'}, body: JSON.stringify({ workspace_id: WORKSPACE_ID, email }) }); }
+async function patchShareRole(id, role){ if(!sessionJWT) throw new Error('Not authed'); return fetch(apiUrl(`shares/${id}`), { method:'PATCH', headers:{'Authorization':`Bearer ${sessionJWT}`,'Content-Type':'application/json'}, body: JSON.stringify({ role }) }); }
+async function removeShare(id){ if(!sessionJWT) throw new Error('Not authed'); return fetch(apiUrl(`shares/${id}`), { method:'DELETE', headers:{'Authorization':`Bearer ${sessionJWT}`}}); }
+async function transferOwner(toEmail){ if(!sessionJWT) throw new Error('Not authed'); return fetch(apiUrl(`workspaces/${encodeURIComponent(WORKSPACE_ID)}/transfer_owner`), { method:'POST', headers:{'Authorization':`Bearer ${sessionJWT}`,'Content-Type':'application/json'}, body: JSON.stringify({ to_email: toEmail }) }); }
 
-/* ---------------- PRESENCE HTTP ---------------- */
-async function presenceBeatHTTP(){ try{ await fetch(apiUrl('presence/beat'), { method:'POST', headers:{ 'Authorization':`Bearer ${sessionJWT}`,'Content-Type':'application/json' }, body: JSON.stringify({ workspace_id: WORKSPACE_ID }) }); }catch{} }
-async function presencePollHTTP(){
-  try{
-    const r = await fetch(apiUrl(`presence?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }});
-    if(!r.ok) return;
-    const j = await r.json().catch(()=>({online:[]}));
-    const mine = currentUserKey;
-    presence.clear();
-    (j.online||[]).forEach(p=>{ if(p.id!==mine) presence.set(p.id, { name:p.name, email:p.email }); });
-    renderPresence();
-  }catch{}
-}
+/*********************** TABS LOAD/SAVE ***********************/
+async function fetchTabs(){ if(!sessionJWT) return {}; const r=await fetch(apiUrl(`tasks?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}); if(!r.ok) return {}; const j=await r.json().catch(()=>({tabs:{}})); return j.tabs||{}; }
+async function saveTabsHTTP(tabs){ if(!sessionJWT) return; await fetch(apiUrl('tasks'), { method:'POST', headers:{'Authorization':`Bearer ${sessionJWT}`,'Content-Type':'application/json'}, body: JSON.stringify({ workspace_id: WORKSPACE_ID, tabs }) }); }
 
-/* ---------------- LIVE WS ---------------- */
-function liveUrl(){ try{ const u=new URL(API_BASE); u.pathname=(u.pathname.replace(/\/+$/,'')+'/live').replace(/\/ {2,}/g,'/'); u.search=`?ws=${encodeURIComponent(WORKSPACE_ID)}&token=${encodeURIComponent(sessionJWT)}`; u.protocol=u.protocol.replace('http','ws'); return u.toString(); }catch{ return null; } }
-function connectLive(){
-  const url = liveUrl(); if(!url) { startHTTPFallback(); return; }
-  try { ws = new WebSocket(url); } catch { startHTTPFallback(); return; }
+/*********************** PRESENCE HTTP ***********************/
+async function presenceBeatHTTP(){ if(!sessionJWT||!WORKSPACE_ID) return; try{ await fetch(apiUrl('presence/beat'), { method:'POST', headers:{ 'Authorization':`Bearer ${sessionJWT}`,'Content-Type':'application/json' }, body: JSON.stringify({ workspace_id: WORKSPACE_ID }) }); }catch{} }
+async function presencePollHTTP(){ if(!sessionJWT||!WORKSPACE_ID) return; try{ const r = await fetch(apiUrl(`presence?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}); if(!r.ok) return; const j = await r.json().catch(()=>({online:[]})); const mine = currentUserKey; presence.clear(); (j.online||[]).forEach(p=>{ if(p.id!==mine) presence.set(p.id, { name:p.name, email:p.email }); }); renderPresence(); }catch{} }
 
+/*********************** LIVE WS ***********************/
+function liveUrl(){ if(!sessionJWT||!WORKSPACE_ID) return null; try{ const u=new URL(API_BASE); u.pathname=(u.pathname.replace(/\/+$/,'')+'/live').replace(/\/{2,}/g,'/'); u.search=`?ws=${encodeURIComponent(WORKSPACE_ID)}&token=${encodeURIComponent(sessionJWT)}`; u.protocol=u.protocol.replace('http','ws'); return u.toString(); }catch{ return null; } }
+function connectLive(){ const url = liveUrl(); if(!url) { return; }
+  try { ws = new WebSocket(url); } catch { return; }
   ws.onopen = ()=>{ wsConnected = true; stopTaskPolling(); };
   ws.onclose = ()=>{ wsConnected = false; startHTTPFallback(); };
   ws.onerror = ()=>{ wsConnected = false; startHTTPFallback(); };
@@ -254,20 +280,17 @@ function connectLive(){
     if(msg.type==='hello'){
       currentUserKey = msg.you?.user_id || currentUserKey;
       presence.clear(); (msg.online||[]).forEach(p=> presence.set(p.id, { name:p.name, email:p.email })); renderPresence();
-      mergeRemoteTabs(msg.tabs||{}, /*by*/ msg.by); // initial merge
+      mergeRemoteTabs(msg.tabs||{}, /*by*/ msg.by);
       if(!activeTab) activeTab = Object.keys(tabData)[0];
       renderTabs(); switchTab(activeTab); stampSync(); return;
     }
     if(msg.type==='tabs:set' && msg.ws===WORKSPACE_ID){
-      // Ignore self echo unless our local state diverged (rare)
       const fromSelf = !!msg.by && msg.by === currentUserKey;
       const changed = mergeRemoteTabs(msg.tabs||{}, msg.by);
       if (!isEditing && !isDragging && (!fromSelf || changed)) {
         if(!tabData[activeTab]) activeTab = Object.keys(tabData)[0]||null;
         renderTabs(); switchTab(activeTab); stampSync();
-      } else {
-        hasRemoteDuringEdit = true; // apply later to DOM
-      }
+      } else { hasRemoteDuringEdit = true; }
       return;
     }
     if(msg.type==='presence/join'){ if(msg.by && msg.by!==currentUserKey){ presence.set(msg.by, { name:msg.name||'', email:msg.email||'' }); renderPresence(); } return; }
@@ -276,139 +299,30 @@ function connectLive(){
 }
 function liveSend(obj){ if(ws && ws.readyState===1){ try{ ws.send(JSON.stringify({ ...obj, ws: WORKSPACE_ID })); }catch{} } }
 
-/* ---------------- PRESENCE UI ---------------- */
-function renderPresence(){
-  const avatars=document.getElementById('presenceAvatars');
-  const list=document.getElementById('presenceList');
-  const count=document.getElementById('presenceCount');
-  avatars.innerHTML=''; list.innerHTML='';
+/*********************** PRESENCE UI ***********************/
+function renderPresence(){ const avatars=document.getElementById('presenceAvatars'); const list=document.getElementById('presenceList'); const count=document.getElementById('presenceCount'); avatars.innerHTML=''; list.innerHTML=''; const others = [...presence.entries()].map(([id,v])=>({id,...v})).sort((a,b)=>(a.name||a.email).localeCompare(b.name||b.email)); count.textContent = others.length ? '' : '0 online'; const max=4; others.slice(0,max).forEach(p=>{ const span=document.createElement('span'); span.className='avatar inline-flex items-center justify-center h-7 w-7 rounded-full bg-indigo-600/10 text-indigo-700 dark:text-indigo-300 text-[11px] font-semibold ring-2 ring-white'; span.title=p.name||p.email; span.textContent=initials(p.name,p.email); const dot=document.createElement('span'); dot.className='presence-dot'; span.appendChild(dot); avatars.appendChild(span); const row=document.createElement('div'); row.className='flex items-center gap-2'; row.innerHTML=`<div class="relative inline-flex items-center justify-center h-6 w-6 rounded-full bg-indigo-600/10 text-indigo-700 dark:text-indigo-300 text-[10px] font-semibold">${initials(p.name,p.email)}<span class="presence-dot" style="right:-1px;bottom:-1px;width:8px;height:8px"></span></div><div class="truncate">${p.name||p.email}</div>`; list.appendChild(row); }); if(others.length>max){ const extra=others.length-max; const more=document.createElement('span'); more.className='avatar inline-flex items-center justify-center h-7 w-7 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[11px] font-semibold ring-2 ring-white'; more.textContent = `+${extra}`; avatars.appendChild(more); } }
 
-  const others = [...presence.entries()].map(([id,v])=>({id,...v})).sort((a,b)=>(a.name||a.email).localeCompare(b.name||b.email));
-  count.textContent = others.length ? '' : '0 online';
+document.getElementById('presenceBtn').onclick = ()=>{ const t=document.getElementById('presenceTooltip'); t.classList.toggle('hidden'); };
 
-  const max=4;
-  others.slice(0,max).forEach(p=>{
-    const span=document.createElement('span');
-    span.className='avatar inline-flex items-center justify-center h-7 w-7 rounded-full bg-indigo-600/10 text-indigo-700 dark:text-indigo-300 text-[11px] font-semibold ring-2 ring-white';
-    span.title=p.name||p.email; span.textContent=initials(p.name,p.email);
-    const dot=document.createElement('span'); dot.className='presence-dot'; span.appendChild(dot);
-    avatars.appendChild(span);
+/*********************** MERGE ***********************/
+function mergeRemoteTabs(remote, by){ const prevJSON = JSON.stringify(tabData); const local = tabData; const editingIds = new Set(editingTasks); tabData = JSON.parse(JSON.stringify(remote||{})); if (editingIds.size){ for (const tabName of Object.keys(tabData)) { for (const col of COLS) { const list = tabData[tabName][col] || []; for (let i=0;i<list.length;i++){ const t = list[i]; if (editingIds.has(t.id)){ const lt = findTask(local, t.id); if (lt){ list[i] = { ...t, content: lt.content, dueDate: lt.dueDate, priority: lt.priority, pos: lt.pos, upd: lt.upd, by: lt.by }; } } } } } } return JSON.stringify(tabData) !== prevJSON; }
+function findTask(data, id){ for (const tab of Object.keys(data||{})){ for (const c of COLS){ const hit = (data[tab][c]||[]).find(x=>x.id===id); if (hit) return hit; } } return null; }
 
-    const row=document.createElement('div');
-    row.className='flex items-center gap-2';
-    row.innerHTML=`<div class="relative inline-flex items-center justify-center h-6 w-6 rounded-full bg-indigo-600/10 text-indigo-700 dark:text-indigo-300 text-[10px] font-semibold">
-      ${initials(p.name,p.email)}<span class="presence-dot" style="right:-1px;bottom:-1px;width:8px;height:8px"></span></div>
-      <div class="truncate">${p.name||p.email}</div>`;
-    list.appendChild(row);
-  });
-  if(others.length>max){
-    const extra=others.length-max;
-    const more=document.createElement('span');
-    more.className='avatar inline-flex items-center justify-center h-7 w-7 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[11px] font-semibold ring-2 ring-white';
-    more.textContent = `+${extra}`; avatars.appendChild(more);
-  }
-}
-document.getElementById('presenceBtn').onclick = ()=>{
-  const t=document.getElementById('presenceTooltip');
-  t.classList.toggle('hidden');
-};
-
-/* ---------------- MERGE (preserve edits) ---------------- */
-function mergeRemoteTabs(remote, by){
-  // returns true if structure differs from current tabData
-  const prevJSON = JSON.stringify(tabData);
-  // Deep clone to avoid reference surprises
-  const local = tabData;
-  const editingIds = new Set(editingTasks);
-
-  // Replace baseline with remote
-  tabData = JSON.parse(JSON.stringify(remote||{}));
-
-  // If we're editing, restore local versions of those tasks by id (content, dueDate, priority, pos)
-  if (editingIds.size){
-    for (const tabName of Object.keys(tabData)) {
-      for (const col of COLS) {
-        const list = tabData[tabName][col] || [];
-        for (let i=0;i<list.length;i++){
-          const t = list[i];
-          if (editingIds.has(t.id)){
-            // find local copy
-            const lt = findTask(local, t.id);
-            if (lt){
-              list[i] = { ...t, content: lt.content, dueDate: lt.dueDate, priority: lt.priority, pos: lt.pos, upd: lt.upd, by: lt.by };
-            }
-          }
-        }
-      }
-    }
-  }
-
-  return JSON.stringify(tabData) !== prevJSON;
-}
-function findTask(data, id){
-  for (const tab of Object.keys(data||{})){
-    for (const c of COLS){
-      const hit = (data[tab][c]||[]).find(x=>x.id===id);
-      if (hit) return hit;
-    }
-  }
-  return null;
-}
-
-/* ---------------- SHAPE / RENDER ---------------- */
-function migrateShapes(data){
-  const out=JSON.parse(JSON.stringify(data||{}));
-  Object.keys(out).forEach(tab=>{
-    COLS.forEach(col=>{
-      let pos=1;
-      out[tab][col]=(out[tab][col]||[]).map(t=>({
-        id: t.id||`task-${cryptoRandom()}`,
-        content: typeof t.content==='string'?t.content:'',
-        dueDate: normalizeDateString(t.dueDate),
-        priority: ['High','Medium','Low'].includes(t.priority)?t.priority:'Medium',
-        pos: Number.isFinite(+t.pos)?+t.pos:pos++,
-        upd: Number.isFinite(+t.upd)?+t.upd:Date.now(),
-        by: t.by||currentUserKey||'unknown'
-      }));
-    });
-  });
-  return out;
-}
+/*********************** SHAPE / RENDER ***********************/
+function migrateShapes(data){ const out=JSON.parse(JSON.stringify(data||{})); Object.keys(out).forEach(tab=>{ COLS.forEach(col=>{ let pos=1; out[tab][col]=(out[tab][col]||[]).map(t=>({ id: t.id||`task-${cryptoRandom()}`, content: typeof t.content==='string'?t.content:'', dueDate: normalizeDateString(t.dueDate), priority: ['High','Medium','Low'].includes(t.priority)?t.priority:'Medium', pos: Number.isFinite(+t.pos)?+t.pos:pos++, upd: Number.isFinite(+t.upd)?+t.upd:Date.now(), by: t.by||currentUserKey||'unknown' })); }); }); return out; }
 function cryptoRandom(){ try{ return crypto.randomUUID(); }catch{ return Math.random().toString(36).slice(2); } }
 
-function renderTabs(){
-  const node=document.getElementById('tabs'); node.innerHTML='';
-  const names=Object.keys(tabData);
-  names.forEach(name=>{
-    const b=document.createElement('button');
-    b.className='tab-button px-4 py-1.5 rounded-full text-sm font-medium bg-transparent border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:border-indigo-500 hover:text-indigo-600 dark:hover:text-white transition-all duration-150 truncate max-w-[160px]';
-    if(name===activeTab){ b.classList.add('border-indigo-500','text-indigo-700','dark:text-white','font-semibold','bg-indigo-50','dark:bg-indigo-600/30'); }
-    b.dataset.tab=name; b.textContent=name;
-    b.onclick=()=>{ switchTab(name); };
-    b.ondblclick=()=>{ if(currentRole==='viewer') return; const nn=prompt('Rename tab:',name); if(!nn||!nn.trim()||nn===name||tabData[nn])return; tabData[nn]=tabData[name]; delete tabData[name]; if(activeTab===name) activeTab=nn; renderTabs(); switchTab(activeTab); pushTabs(); };
-    b.oncontextmenu=(e)=>{ e.preventDefault(); if(currentRole==='viewer')return; if(confirm(`Delete tab "${name}"?`)){ delete tabData[name]; if(activeTab===name) activeTab=Object.keys(tabData)[0]||null; renderTabs(); renderBoard(); pushTabs(); } };
-    node.appendChild(b);
-  });
-}
+function renderTabs(){ const node=document.getElementById('tabs'); node.innerHTML=''; const names=Object.keys(tabData); names.forEach(name=>{ const b=document.createElement('button'); b.className='tab-button px-4 py-1.5 rounded-full text-sm font-medium bg-transparent border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:border-indigo-500 hover:text-indigo-600 dark:hover:text-white transition-all duration-150 truncate max-w-[160px]'; if(name===activeTab){ b.classList.add('border-indigo-500','text-indigo-700','dark:text-white','font-semibold','bg-indigo-50','dark:bg-indigo-600/30'); } b.dataset.tab=name; b.textContent=name; b.onclick=()=>{ switchTab(name); }; b.ondblclick=()=>{ if(currentRole==='viewer') return; const nn=prompt('Rename tab:',name); if(!nn||!nn.trim()||nn===name||tabData[nn])return; tabData[nn]=tabData[name]; delete tabData[name]; if(activeTab===name) activeTab=nn; renderTabs(); switchTab(activeTab); pushTabs(); }; b.oncontextmenu=(e)=>{ e.preventDefault(); if(currentRole==='viewer')return; if(confirm(`Delete tab "${name}"?`)){ delete tabData[name]; if(activeTab===name) activeTab=Object.keys(tabData)[0]||null; renderTabs(); renderBoard(); pushTabs(); } }; node.appendChild(b); }); }
 function switchTab(tab){ if(!tabData[tab]) return; activeTab=tab; document.querySelectorAll('.tab-button').forEach(x=>x.classList.remove('border-indigo-500','text-indigo-700','dark:text-white','font-semibold','bg-indigo-50','dark:bg-indigo-600/30')); const btn=[...document.querySelectorAll('.tab-button')].find(b=>b.dataset.tab===tab); if(btn) btn.classList.add('border-indigo-500','text-indigo-700','dark:text-white','font-semibold','bg-indigo-50','dark:bg-indigo-600/30'); renderBoard(); }
 function ensureAtLeastOne(){ const cols=tabData[activeTab]; if(!cols) return; if((cols.todo?.length||0)+(cols.inprogress?.length||0)+(cols.done?.length||0)===0){ const id=`task-${cryptoRandom()}`; cols.todo.push({ id, content:'', dueDate:'', priority:'Medium', pos:1, upd:Date.now(), by: currentUserKey }); } }
 
-function createTaskElement(id, content='', dueDate='', priority='Medium', column, pos){
-  const w=document.createElement('div');
-  w.id=id; w.setAttribute('data-task','1'); w.draggable=currentRole!=='viewer';
-  w.className='relative p-3 rounded bg-white dark:bg-gray-700 shadow cursor-move mb-2'; w.setAttribute('data-column',column);
-
-  const editable=document.createElement('div'); editable.className='editable w-full font-medium mb-1'; editable.contentEditable=(currentRole!=='viewer'); editable.innerText=content;
-  const placeholder=document.createElement('span'); placeholder.className='absolute left-3 top-3 text-sm text-gray-400 pointer-events-none'; placeholder.textContent='Click to edit...';
-  function toggle(){ placeholder.style.display = editable.innerText.trim()===''?'block':'none'; }
-
+function createTaskElement(id, content='', dueDate='', priority='Medium', column, pos){ const w=document.createElement('div'); w.id=id; w.setAttribute('data-task','1'); w.draggable=currentRole!=='viewer'; w.className='relative p-3 rounded bg-white dark:bg-gray-700 shadow cursor-move mb-2'; w.setAttribute('data-column',column); const editable=document.createElement('div'); editable.className='editable w-full font-medium mb-1'; editable.contentEditable=(currentRole!=='viewer'); editable.innerText=content; const placeholder=document.createElement('span'); placeholder.className='absolute left-3 top-3 text-sm text-gray-400 pointer-events-none'; placeholder.textContent='Click to edit...'; function toggle(){ placeholder.style.display = editable.innerText.trim()===''?'block':'none'; }
   const row=document.createElement('div'); row.className='flex items-center gap-2';
   const dateInput=document.createElement('input'); dateInput.type='date'; dateInput.value=normalizeDateString(dueDate)||''; dateInput.disabled=(currentRole==='viewer'); dateInput.className='mt-1 text-xs bg-transparent text-gray-700 dark:text-gray-200 border border-transparent rounded px-1 date-badge';
-  const prioritySelect=document.createElement('select'); prioritySelect.disabled=(currentRole==='viewer'); prioritySelect.className='mt-1 ml-2 text-xs bg-transparent text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-gray-600 rounded px-1';
-  ['High','Medium','Low'].forEach(level=>{ const o=document.createElement('option'); o.value=level; o.text=level; if(level===priority) o.selected=true; prioritySelect.appendChild(o); });
+  const prioritySelect=document.createElement('select'); prioritySelect.disabled=(currentRole==='viewer'); prioritySelect.className='mt-1 ml-2 text-xs bg-transparent text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-gray-600 rounded px-1'; ['High','Medium','Low'].forEach(level=>{ const o=document.createElement('option'); o.value=level; o.text=level; if(level===priority) o.selected=true; prioritySelect.appendChild(o); });
   const del=document.createElement('button'); del.className='absolute top-2 right-2 text-gray-400 hover:text-red-500'; del.innerHTML='<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>'; del.title='Delete Task'; del.onclick=()=>{ if(currentRole==='viewer')return; if(confirm('Delete this task?')) removeTaskById(id); };
 
-  // Smooth typing: mark editing while focused
+  // Smooth typing flags
   editable.addEventListener('focus', ()=>{ isEditing=true; editingTasks.add(id); });
   editable.addEventListener('blur', ()=>{ editingTasks.delete(id); if(editingTasks.size===0){ isEditing=false; if(hasRemoteDuringEdit){ hasRemoteDuringEdit=false; renderTabs(); switchTab(activeTab); stampSync(); } } });
   editable.addEventListener('input', ()=>{ toggle(); persistTaskEdits(id,{ content: editable.innerText.trim() }); });
@@ -432,242 +346,123 @@ function createTaskElement(id, content='', dueDate='', priority='Medium', column
 
 const dragContext = { id:null, fromCol:null, overCol:null, insertIndex:null };
 function clearDrag(){ dragContext.id=null; dragContext.fromCol=null; dragContext.overCol=null; dragContext.insertIndex=null; }
-function getAfter(container, y){
-  const els=[...container.querySelectorAll('[data-task]:not(.dragging)')];
-  return els.reduce((closest,child)=>{ const box=child.getBoundingClientRect(); const off=y-box.top-box.height/2; if(off<0 && off>closest.offset){ return {offset:off, element:child}; } else return closest; },{offset:-Infinity}).element;
-}
-function computeInsertIndex(colEl, indicator){
-  const siblings=[...colEl.querySelectorAll('[data-task]')];
-  if(siblings.length===0) return 0;
-  const all=[...colEl.children]; let index=0;
-  for(let i=0;i<all.length;i++){ const el=all[i]; if(el===indicator){ index=[...all.slice(0,i)].filter(n=>n.hasAttribute && n.hasAttribute('data-task')).length; return index; } }
-  return siblings.length;
-}
+function getAfter(container, y){ const els=[...container.querySelectorAll('[data-task]:not(.dragging)')]; return els.reduce((closest,child)=>{ const box=child.getBoundingClientRect(); const off=y-box.top-box.height/2; if(off<0 && off>closest.offset){ return {offset:off, element:child}; } else return closest; },{offset:-Infinity}).element; }
+function computeInsertIndex(colEl, indicator){ const siblings=[...colEl.querySelectorAll('[data-task]')]; if(siblings.length===0) return 0; const all=[...colEl.children]; let index=0; for(let i=0;i<all.length;i++){ const el=all[i]; if(el===indicator){ index=[...all.slice(0,i)].filter(n=>n.hasAttribute && n.hasAttribute('data-task')).length; return index; } } return siblings.length; }
 function newPosBetween(prev, next){ const A=Number.isFinite(prev)?+prev:0; const B=Number.isFinite(next)?+next:A+2; if(B-A>1e-6) return A+(B-A)/2; return A+0.000001; }
 function reindex(list){ list.forEach((t,i)=> t.pos=i+1); }
 
-function renderBoard(){
-  const columns = COLS;
-  columns.forEach(col=>{
-    const colEl=document.getElementById(col);
-    colEl.querySelectorAll('[data-task]')?.forEach(n=>n.remove());
+function renderBoard(){ const columns = COLS; columns.forEach(col=>{ const colEl=document.getElementById(col); colEl.querySelectorAll('[data-task]')?.forEach(n=>n.remove()); colEl.ondragover = (e)=>{ e.preventDefault(); colEl.classList.add('drag-over','show-drop'); const after=getAfter(colEl, e.clientY); const indicator=colEl.querySelector('.drop-indicator'); if(after==null){ colEl.appendChild(indicator); } else { colEl.insertBefore(indicator, after); } dragContext.overCol = colEl.dataset.col; dragContext.insertIndex = computeInsertIndex(colEl, indicator); }; colEl.ondragleave = ()=>{ colEl.classList.remove('drag-over','show-drop'); }; colEl.ondrop = (e)=>{ e.preventDefault(); colEl.classList.remove('drag-over','show-drop'); const id=dragContext.id; if(!id) return; commitReorder(id, dragContext.fromCol, colEl.dataset.col, dragContext.insertIndex); clearDrag(); }; }); if(!activeTab || !tabData[activeTab]) return; ensureAtLeastOne(); const data=tabData[activeTab]; COLS.forEach(col=>{ const colEl=document.getElementById(col); (data[col]||[]).sort((a,b)=> (a.pos||0)-(b.pos||0)).forEach(t=> colEl.appendChild(createTaskElement(t.id,t.content,t.dueDate,t.priority,col,t.pos))); }); }
 
-    colEl.ondragover = (e)=>{
-      e.preventDefault();
-      colEl.classList.add('drag-over','show-drop');
-      const after=getAfter(colEl, e.clientY);
-      const indicator=colEl.querySelector('.drop-indicator');
-      if(after==null){ colEl.appendChild(indicator); } else { colEl.insertBefore(indicator, after); }
-      dragContext.overCol = colEl.dataset.col;
-      dragContext.insertIndex = computeInsertIndex(colEl, indicator);
-    };
-    colEl.ondragleave = ()=>{ colEl.classList.remove('drag-over','show-drop'); };
-    colEl.ondrop = (e)=>{
-      e.preventDefault();
-      colEl.classList.remove('drag-over','show-drop');
-      const id=dragContext.id; if(!id) return;
-      commitReorder(id, dragContext.fromCol, colEl.dataset.col, dragContext.insertIndex);
-      clearDrag();
-    };
-  });
+/*********************** Mutations -> Live push ***********************/
+function persistTaskEdits(taskId, patch){ if(!activeTab || !tabData[activeTab]) return; const cols=COLS; for(const col of cols){ const list=tabData[activeTab][col]||[]; const idx=list.findIndex(t=>t.id===taskId); if(idx!==-1){ if('dueDate' in patch) patch.dueDate = normalizeDateString(patch.dueDate); list[idx] = { ...list[idx], ...patch, upd: Date.now(), by: currentUserKey }; break; } } pushTabs(); }
+function removeTaskById(taskId){ if(!activeTab || !tabData[activeTab]) return; for(const col of COLS){ const list=tabData[activeTab][col]||[]; const idx=list.findIndex(t=>t.id===taskId); if(idx!==-1){ list.splice(idx,1); break; } } renderBoard(); pushTabs(); }
+function clearAllTasks(){ if(currentRole==='viewer') return; if(!activeTab) return; if(!confirm('Clear all tasks in this tab?')) return; tabData[activeTab] = { todo:[], inprogress:[], done:[] }; renderBoard(); pushTabs(); }
+function addNewTask(){ if(currentRole==='viewer') return; if(!activeTab){ const def='Click to edit'; if(!tabData[def]) tabData[def]={ todo:[], inprogress:[], done:[] }; activeTab=def; renderTabs(); } const id=`task-${cryptoRandom()}`; const now=Date.now(); const t={ id, content:'', dueDate:'', priority:'Medium', pos:(tabData[activeTab].todo.slice(-1)[0]?.pos||0)+1, upd:now, by:currentUserKey }; tabData[activeTab].todo.push(t); renderBoard(); pushTabs(); const el = document.getElementById(id)?.querySelector('.editable'); if (el){ el.focus(); } }
+function commitReorder(taskId, fromCol, toCol, insertIndex){ if(currentRole==='viewer') return; const cols=tabData[activeTab]; let moved; const fromList=cols[fromCol]||[]; const i=fromList.findIndex(t=>t.id===taskId); if(i!==-1){ moved=fromList.splice(i,1)[0]; } if(!moved) return; const target=cols[toCol]=cols[toCol]||[]; if(insertIndex==null||insertIndex<0) insertIndex=target.length; if(insertIndex>target.length) insertIndex=target.length; const prev=target[insertIndex-1]?.pos, next=target[insertIndex]?.pos; moved.pos=newPosBetween(prev,next); moved.upd=Date.now(); moved.by=currentUserKey; target.splice(insertIndex,0,moved); if(!Number.isFinite(prev)||!Number.isFinite(next)||Math.abs((next||moved.pos)-(prev||0))<1e-6){ reindex(target); } renderBoard(); pushTabs(); }
+const pushTabs = debounce(()=> { try { liveSend({ type:'tabs:update', tabs: tabData }); } catch {} saveTabsHTTP(tabData).catch(()=>{}); stampSync(); }, 250);
 
-  if(!activeTab || !tabData[activeTab]) return;
-  ensureAtLeastOne();
-  const data=tabData[activeTab];
-  COLS.forEach(col=>{
-    const colEl=document.getElementById(col);
-    (data[col]||[]).sort((a,b)=> (a.pos||0)-(b.pos||0)).forEach(t=> colEl.appendChild(createTaskElement(t.id,t.content,t.dueDate,t.priority,col,t.pos)));
-  });
-}
-
-/* ---------------- Mutations -> Live push ---------------- */
-function persistTaskEdits(taskId, patch){
-  if(!activeTab || !tabData[activeTab]) return;
-  const cols=COLS;
-  for(const col of cols){
-    const list=tabData[activeTab][col]||[];
-    const idx=list.findIndex(t=>t.id===taskId);
-    if(idx!==-1){
-      if('dueDate' in patch) patch.dueDate = normalizeDateString(patch.dueDate);
-      list[idx] = { ...list[idx], ...patch, upd: Date.now(), by: currentUserKey };
-      break;
-    }
-  }
-  pushTabs();
-}
-function removeTaskById(taskId){
-  if(!activeTab || !tabData[activeTab]) return;
-  for(const col of COLS){
-    const list=tabData[activeTab][col]||[];
-    const idx=list.findIndex(t=>t.id===taskId);
-    if(idx!==-1){ list.splice(idx,1); break; }
-  }
-  renderBoard(); pushTabs();
-}
-function clearAllTasks(){
-  if(currentRole==='viewer') return;
-  if(!activeTab) return;
-  if(!confirm('Clear all tasks in this tab?')) return;
-  tabData[activeTab] = { todo:[], inprogress:[], done:[] };
-  renderBoard(); pushTabs();
-}
-function addNewTask(){
-  if(currentRole==='viewer') return;
-  if(!activeTab){ const def='Click to edit'; if(!tabData[def]) tabData[def]={ todo:[], inprogress:[], done:[] }; activeTab=def; renderTabs(); }
-  const id=`task-${cryptoRandom()}`; const now=Date.now();
-  const t={ id, content:'', dueDate:'', priority:'Medium', pos:(tabData[activeTab].todo.slice(-1)[0]?.pos||0)+1, upd:now, by:currentUserKey };
-  tabData[activeTab].todo.push(t); renderBoard(); pushTabs();
-  // focus the new task for immediate typing
-  const el = document.getElementById(id)?.querySelector('.editable'); if (el){ el.focus(); }
-}
-function commitReorder(taskId, fromCol, toCol, insertIndex){
-  if(currentRole==='viewer') return;
-  const cols=tabData[activeTab];
-  let moved; const fromList=cols[fromCol]||[]; const i=fromList.findIndex(t=>t.id===taskId);
-  if(i!==-1){ moved=fromList.splice(i,1)[0]; }
-  if(!moved) return;
-  const target=cols[toCol]=cols[toCol]||[];
-  if(insertIndex==null||insertIndex<0) insertIndex=target.length;
-  if(insertIndex>target.length) insertIndex=target.length;
-  const prev=target[insertIndex-1]?.pos, next=target[insertIndex]?.pos;
-  moved.pos=newPosBetween(prev,next); moved.upd=Date.now(); moved.by=currentUserKey;
-  target.splice(insertIndex,0,moved);
-  if(!Number.isFinite(prev)||!Number.isFinite(next)||Math.abs((next||moved.pos)-(prev||0))<1e-6){ reindex(target); }
-  renderBoard(); pushTabs();
-}
-const pushTabs = debounce(()=> {
-  try { liveSend({ type:'tabs:update', tabs: tabData }); } catch {}
-  saveTabsHTTP(tabData).catch(()=>{});
-  stampSync();
-}, 250);
-
-/* ---------------- Members UI ---------------- */
-function openMembers(){ document.getElementById('membersModal').classList.remove('hidden'); renderMembers(); }
+/*********************** Members UI ***********************/
+function openMembers(){ if(currentRole==='viewer'){ alert('Sign in with editor/owner access to manage members.'); return; } document.getElementById('membersModal').classList.remove('hidden'); renderMembers(); }
 function closeMembers(){ document.getElementById('membersModal').classList.add('hidden'); }
-async function renderMembers(){
-  const list = document.getElementById('membersList');
-  list.innerHTML = '<div class="py-6 text-sm text-gray-500">Loading…</div>';
-  const shares = await listShares();
-  list.innerHTML = '';
-  shares.forEach(s=>{
-    const row=document.createElement('div');
-    row.className='flex items-center justify-between py-3';
-    const who=document.createElement('div'); who.className='flex items-center gap-3';
-    const bubble=document.createElement('div'); bubble.className='h-8 w-8 rounded-full bg-indigo-600/15 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-xs font-semibold';
-    bubble.textContent = initials('', s.email||'');
-    const meta=document.createElement('div'); meta.innerHTML = `<div class="text-sm font-medium">${s.email||'—'}</div>`;
-    who.appendChild(bubble); who.appendChild(meta);
+async function renderMembers(){ const list = document.getElementById('membersList'); list.innerHTML = '<div class="py-6 text-sm text-gray-500">Loading…</div>'; const shares = await listShares(); list.innerHTML = ''; shares.forEach(s=>{ const row=document.createElement('div'); row.className='flex items-center justify-between py-3'; const who=document.createElement('div'); who.className='flex items-center gap-3'; const bubble=document.createElement('div'); bubble.className='h-8 w-8 rounded-full bg-indigo-600/15 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-xs font-semibold'; bubble.textContent = initials('', s.email||''); const meta=document.createElement('div'); meta.innerHTML = `<div class="text-sm font-medium">${s.email||'—'}</div>`; who.appendChild(bubble); who.appendChild(meta); const actions=document.createElement('div'); actions.className='flex items-center gap-2'; if (s.role === 'owner') { const tag=document.createElement('span'); tag.className='text-xs text-gray-500'; tag.textContent='owner'; actions.appendChild(tag); } else if (currentRole==='owner' && s.id) { const sel=document.createElement('select'); sel.className='text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-800'; ['editor','viewer','owner'].forEach(r=>{ const o=document.createElement('option'); o.value=r; o.text=r; if(String(s.role||'editor')===r) o.selected=true; sel.appendChild(o); }); sel.onchange = async ()=>{ if(sel.value==='owner'){ if(!confirm(`Transfer ownership to ${s.email}? You will lose owner privileges.`)) { sel.value = s.role||'editor'; return; } const r=await transferOwner(s.email||''); if(!r.ok){ alert('Failed to transfer'); sel.value=s.role||'editor'; } else { alert('Ownership transferred'); closeMembers(); location.reload(); } return; } const r=await patchShareRole(s.id, sel.value); if(!r.ok) alert('Failed to update role'); }; const del=document.createElement('button'); del.className='px-2 py-1 text-xs rounded bg-red-50 text-red-600 hover:bg-red-100'; del.textContent='Remove'; del.onclick = async ()=>{ if(!confirm('Remove this member?')) return; const r=await removeShare(s.id); if(r.ok) renderMembers(); else alert('Failed to remove'); }; actions.appendChild(sel); actions.appendChild(del); } row.appendChild(who); row.appendChild(actions); list.appendChild(row); }); }
 
-    const actions=document.createElement('div'); actions.className='flex items-center gap-2';
-    if (s.role === 'owner') {
-      const tag=document.createElement('span'); tag.className='text-xs text-gray-500'; tag.textContent='owner';
-      actions.appendChild(tag);
-    } else if (currentRole==='owner' && s.id) {
-      const sel=document.createElement('select');
-      sel.className='text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-800';
-      ['editor','viewer','owner'].forEach(r=>{ const o=document.createElement('option'); o.value=r; o.text=r; if(String(s.role||'editor')===r) o.selected=true; sel.appendChild(o); });
-      sel.onchange = async ()=>{
-        if(sel.value==='owner'){
-          if(!confirm(`Transfer ownership to ${s.email}? You will lose owner privileges.`)) { sel.value = s.role||'editor'; return; }
-          const r=await transferOwner(s.email||''); if(!r.ok){ alert('Failed to transfer'); sel.value=s.role||'editor'; } else { alert('Ownership transferred'); closeMembers(); location.reload(); }
-          return;
-        }
-        const r=await patchShareRole(s.id, sel.value); if(!r.ok) alert('Failed to update role');
-      };
-      const del=document.createElement('button'); del.className='px-2 py-1 text-xs rounded bg-red-50 text-red-600 hover:bg-red-100'; del.textContent='Remove';
-      del.onclick = async ()=>{ if(!confirm('Remove this member?')) return; const r=await removeShare(s.id); if(r.ok) renderMembers(); else alert('Failed to remove'); };
-      actions.appendChild(sel); actions.appendChild(del);
-    }
-    row.appendChild(who); row.appendChild(actions); list.appendChild(row);
-  });
-}
-// ---------------- Boot / fallback orchestration ----------------
-function setReportsHref(){
-const btn=document.getElementById('reportsLink');
-if(btn){ btn.onclick=()=>{ if(!WORKSPACE_ID){ alert('Open a workspace first.'); return; } location.href=`reports.html?ws=${encodeURIComponent(WORKSPACE_ID)}`; }; }
-const logo=document.getElementById('workspacesLink'); if(logo){ logo.href='workspace.html'; }
-}
+/*********************** Helpers for Part 2 ***********************/
+function setReportsHref(){ const btn=document.getElementById('reportsLink'); if(btn){ btn.onclick=()=>{ if(!WORKSPACE_ID){ alert('Open a workspace first.'); return; } location.href=`reports.html?ws=${encodeURIComponent(WORKSPACE_ID)}`; }; } const logo=document.getElementById('workspacesLink'); if(logo){ logo.href='workspace.html'; } }
 function stopTaskPolling(){ if(taskPollTimer){ clearInterval(taskPollTimer); taskPollTimer=null; } }
-function startHTTPFallback(){
-if(!presenceBeatTimer){ presenceBeatHTTP(); presenceBeatTimer = setInterval(presenceBeatHTTP, 10000); }
-if(!presencePollTimer){ presencePollHTTP(); presencePollTimer = setInterval(presencePollHTTP, 5000); }
-if(!taskPollTimer){
-taskPollTimer = setInterval(async ()=>{
-try{
-const serverTabs = migrateShapes(await fetchTabs());
-if (isEditing || isDragging){
-// merge silently, render later
-const changed = mergeRemoteTabs(serverTabs);
-if (changed) hasRemoteDuringEdit = true;
-return;
-}
-const changed = mergeRemoteTabs(serverTabs);
-if (changed){
-if(!tabData[activeTab]) activeTab = Object.keys(tabData)[0]||activeTab;
-renderTabs(); switchTab(activeTab); stampSync();
-}
-}catch{}
-}, 2000);
-}
-}
+function startHTTPFallback(){ if(!sessionJWT||!WORKSPACE_ID) return; if(!presenceBeatTimer){ presenceBeatHTTP(); presenceBeatTimer = setInterval(presenceBeatHTTP, 10000); } if(!presencePollTimer){ presencePollHTTP(); presencePollTimer = setInterval(presencePollHTTP, 5000); } if(!taskPollTimer){ taskPollTimer = setInterval(async ()=>{ try{ const serverTabs = migrateShapes(await fetchTabs()); if (isEditing || isDragging){ const changed = mergeRemoteTabs(serverTabs); if (changed) hasRemoteDuringEdit = true; return; } const changed = mergeRemoteTabs(serverTabs); if (changed){ if(!tabData[activeTab]) activeTab = Object.keys(tabData)[0]||activeTab; renderTabs(); switchTab(activeTab); stampSync(); } }catch{} }, 2000); } }
 
-
-// Button wiring
-const $ = sel => document.querySelector(sel);
-$('#addTabBtn').onclick = ()=>{ if(currentRole==='viewer') return; const name=prompt('Enter tab name:'); if(!name||!name.trim()) return; const n=name.trim(); if(tabData[n]) return switchTab(n); tabData[n]={ todo:[], inprogress:[], done:[] }; renderTabs(); switchTab(n); pushTabs(); };
-$('#newTaskBtn').onclick = addNewTask;
-$('#clearBtn').onclick = clearAllTasks;
-$('#exportBtn').onclick = ()=>{ const board=document.getElementById('board'); html2pdf().set({ margin:.5, filename:'Solara-Board.pdf', image:{type:'jpeg',quality:.98}, html2canvas:{scale:2}, jsPDF:{unit:'in', format:'letter', orientation:'landscape'} }).from(board).save(); };
-$('#manageBtn').onclick = ()=>{ if(!WORKSPACE_ID) return alert('Open a workspace first.'); openMembers(); };
-
-
-$('#userButton').onclick = ()=> document.getElementById('userMenu').classList.toggle('hidden');
-$('#addUserBtn').onclick = ()=> openMembers();
-$('#signOutBtn').onclick = async ()=>{
-try{ if(sessionJWT){ await fetch(apiUrl('logout'), { method:'POST', headers:{ 'Authorization':`Bearer ${sessionJWT}` } }).catch(()=>{}); } } finally {
-localStorage.removeItem('stytch_session_jwt'); localStorage.removeItem('solara_session_jwt'); location.replace('/sign-in.html');
-}
-};
-$('#inviteBtn').onclick = async ()=>{
-const input=document.getElementById('inviteEmail'); const email=(input.value||'').trim().toLowerCase(); if(!email) return;
-const r=await invite(email); if(r.ok){ input.value=''; renderMembers(); alert('Invitation created.'); } else { alert('Invite failed.'); }
-};
+function disableEditorUIIfViewer(){ const isViewer = currentRole==='viewer'; const ids=['addTabBtn','newTaskBtn','clearBtn','manageBtn']; ids.forEach(id=>{ const el=document.getElementById(id); if(!el) return; el.classList.toggle('opacity-50', isViewer); el.classList.toggle('pointer-events-none', isViewer); }); }
 
 
 async function boot(){
-const ok = await verifySessionAndHydrate();
-if(!ok){ location.replace('/sign-in.html'); return; }
+// 0) Try to hydrate session without looping
+const authed = await verifySessionAndHydrate();
+if(!authed){
+if(!recentRedirectGuard()){
+// Show banner; don't redirect automatically
+showAuthRequired();
+}
+currentRole = 'viewer';
+}
 
 
+// 1) Workspace
 const url=new URL(location.href);
 WORKSPACE_ID = url.searchParams.get('ws') || localStorage.getItem('solara_last_ws') || '';
 if(!WORKSPACE_ID){ document.getElementById('wsBanner').classList.remove('hidden'); }
 else { localStorage.setItem('solara_last_ws', WORKSPACE_ID); }
 
 
-updateAuthUI();
 setReportsHref();
 
 
-// Role + Name
+// 2) Role + Name/Email in header
+if(authed){
 currentRole = await fetchRole();
+try{
 const wlist = await fetch(apiUrl('workspaces'), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}).then(r=>r.ok?r.json():{workspaces:[]}).catch(()=>({workspaces:[]}));
 const wsRow = (wlist.workspaces||[]).find(w=>w.id===WORKSPACE_ID);
 WORKSPACE_NAME = wsRow?.name || '';
 document.getElementById('wsName').textContent = WORKSPACE_NAME || '—';
 if (wsRow && wsRow.owner_id && currentRole !== 'owner' && wsRow.owner_id === currentUserKey) currentRole = 'owner';
+}catch{}
+} else {
+document.getElementById('wsName').textContent = '—';
+}
 
 
-// HTTP bootstrap
-tabData = migrateShapes(await fetchTabs());
+// 3) Tabs bootstrap (server if authed; otherwise minimal local)
+if(authed){
+try{ tabData = migrateShapes(await fetchTabs()); }catch{ tabData = {}; }
+} else {
+tabData = tabData && Object.keys(tabData).length ? tabData : { 'Read-only': { todo:[], inprogress:[], done:[] } };
+}
 if(Object.keys(tabData).length===0){ tabData['Click to edit']={ todo:[], inprogress:[], done:[] }; }
 activeTab = Object.keys(tabData)[0];
 renderTabs(); switchTab(activeTab);
 
 
-// Fallback + Live
-startHTTPFallback();
-connectLive();
+// 4) Background sync (only if authed)
+if(authed){ startHTTPFallback(); connectLive(); }
+disableEditorUIIfViewer();
+
+
+// 5) Wire UI
+document.getElementById('addTabBtn').onclick = ()=>{ if(currentRole==='viewer') return; const name=prompt('Enter tab name:'); if(!name||!name.trim()) return; const n=name.trim(); if(tabData[n]) return switchTab(n); tabData[n]={ todo:[], inprogress:[], done:[] }; renderTabs(); switchTab(n); pushTabs(); };
+document.getElementById('newTaskBtn').onclick = addNewTask;
+document.getElementById('clearBtn').onclick = clearAllTasks;
+document.getElementById('exportBtn').onclick = ()=>{ const board=document.getElementById('board'); html2pdf().set({ margin:.5, filename:'Solara-Board.pdf', image:{type:'jpeg',quality:.98}, html2canvas:{scale:2}, jsPDF:{unit:'in', format:'letter', orientation:'landscape'} }).from(board).save(); };
+document.getElementById('manageBtn').onclick = ()=>{ if(!WORKSPACE_ID){ alert('Open a workspace first.'); return; } openMembers(); };
+
+
+document.getElementById('userButton').onclick = ()=> document.getElementById('userMenu').classList.toggle('hidden');
+document.getElementById('addUserBtn').onclick = ()=> openMembers();
+document.getElementById('signOutBtn').onclick = async ()=>{
+try{ if(sessionJWT){ await fetch(apiUrl('logout'), { method:'POST', headers:{ 'Authorization':`Bearer ${sessionJWT}` } }).catch(()=>{}); } } finally {
+try{ delCookie('stytch_session_jwt'); delCookie('solara_session_jwt'); localStorage.removeItem('stytch_session_jwt'); localStorage.removeItem('solara_session_jwt'); }catch{}
+markRedirectGuard();
+const ret = encodeURIComponent(location.pathname + location.search + location.hash);
+location.href = `sign-in.html?return=${ret}`;
+}
+};
+
+
+document.getElementById('inviteBtn').onclick = async ()=>{
+const input=document.getElementById('inviteEmail'); const email=(input.value||'').trim().toLowerCase(); if(!email) return;
+if(currentRole==='viewer'){ alert('Sign in as editor/owner to invite.'); return; }
+const r=await invite(email); if(r.ok){ input.value=''; renderMembers(); alert('Invitation created.'); } else { alert('Invite failed.'); }
+};
+
+
+// 6) Sign-in banner actions
+const signInNowBtn = document.getElementById('signInNowBtn');
+if(signInNowBtn){ signInNowBtn.onclick = ()=>{ markRedirectGuard(); location.href = signInUrl(); }; }
+const continueViewerBtn = document.getElementById('continueViewerBtn');
+if(continueViewerBtn){ continueViewerBtn.onclick = ()=>{ currentRole='viewer'; document.getElementById('authRequired').classList.add('hidden'); disableEditorUIIfViewer(); }; }
+
+
+// 7) Stamp initial sync time
+stampSync();
 }
 
 
