@@ -1,4 +1,4 @@
-<!-- Solara v11.0 — Local‑first UI + Op‑log Client (ephemeral awareness + durable ops) -->
+<!-- Solara v11.1 — Local‑first UI + Op‑log Client (ephemeral awareness + durable ops + members modal fix) -->
 <!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
@@ -87,6 +87,9 @@
       <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m0 0A2.99 2.99 0 017 6h10a2.99 2.99 0 012.418 3H19v10a2 2 0 01-2 2H7a2 2 0 01-2-2V9h.582zM10 11v6m4-6v6"/></svg>
     </button>
     <button id="newTaskBtn" class="px-4 py-1.5 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-500 shadow transition">+</button>
+    <button id="manageBtn" class="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 transition" title="Manage members">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.57-.906 3.435.96 2.53 2.53a1.724 1.724 0 001.065 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.906 1.57-.96 3.435-2.53 2.53a1.724 1.724 0 00-2.573 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.57.906-3.435-.96-2.53-2.53A1.724 1.724 0 003.087 13.9c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.906-1.57.96-3.435 2.53-2.53.98.565 2.229.11 2.642-1.13zM12 9a3 3 0 110 6 3 3 0 010-6z"/></svg>
+    </button>
   </div>
 </nav>
 
@@ -115,9 +118,6 @@
       </button>
     </div>
     <div class="flex items-center gap-1">
-      <button id="manageBtn" class="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 transition" title="Manage members">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.57-.906 3.435.96 2.53 2.53a1.724 1.724 0 001.065 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.906 1.57-.96 3.435-2.53 2.53a1.724 1.724 0 00-2.573 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.57.906-3.435-.96-2.53-2.53A1.724 1.724 0 003.087 13.9c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.906-1.57.96-3.435 2.53-2.53.98.565 2.229.11 2.642-1.13zM12 9a3 3 0 110 6 3 3 0 010-6z"/></svg>
-      </button>
       <button id="exportBtn" class="ml-1 p-2 rounded-full hover:bg-indigo-100 text-indigo-600 transition" title="Download Board">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 16l4-5h-3V4h-2v7H8l4 5zm-7 4h14v-2H5v2z"/></svg>
       </button>
@@ -128,6 +128,24 @@
     <div class="slot">© 2025 ZenLock Group (ZLG). All rights reserved.</div>
     <div class="slot text-right truncate"><span id="lastSynced">Last synced: —</span></div>
   </footer>
+</div>
+
+<!-- Members Modal -->
+<div id="membersModal" class="hidden fixed inset-0 z-[60] flex items-center justify-center">
+  <div class="absolute inset-0 bg-black/40" onclick="closeMembers()"></div>
+  <div class="relative w-full max-w-lg rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-5 shadow-xl">
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="text-lg font-semibold">Workspace Members</h3>
+      <button class="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800" onclick="closeMembers()" title="Close">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="flex gap-2 mb-3">
+      <input id="inviteEmail" type="email" placeholder="name@example.com" class="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm"/>
+      <button id="inviteBtn" class="px-3 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 text-sm">Invite</button>
+    </div>
+    <div id="membersList" class="divide-y divide-gray-200 dark:divide-gray-700"></div>
+  </div>
 </div>
 
 <script>
@@ -169,7 +187,7 @@ function stampSync(){ document.getElementById('lastSynced').textContent = 'Last 
 function cryptoId(){ try{ return crypto.randomUUID(); }catch{ return Math.random().toString(36).slice(2); } }
 
 /* ---------------- AUTH ---------------- */
-function displayNameFor(u){ const f=u?.name?.first_name, l=u?.name?.last_name, e=u?.email_addresses?.[0]?.email_address; return [f,l].filter(Boolean).join(' ') || e || 'User'; }
+function displayNameFor(u){ const f=u?.name?.first_name, l=u?.last_name?u?.last_name:u?.name?.last_name, e=u?.email_addresses?.[0]?.email_address; return [f,l].filter(Boolean).join(' ') || e || 'User'; }
 function updateAuthUI(){ const name=displayNameFor(authedUser); const email=authedUser?.email_addresses?.[0]?.email_address||''; document.getElementById('avatar').textContent = initials(name,email); document.getElementById('userName').textContent = name; document.getElementById('userEmail').textContent = email; }
 async function verifySessionAndHydrate(){ sessionJWT = getSessionJWT(); if(!sessionJWT) return false; try{ const r = await fetch(apiUrl('auth/check'), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}); if(!r.ok) return false; const data = await r.json(); currentUserKey = data.user_id; const email = data.email ? [{ email_address: data.email }] : []; const parts = (data.name||'').split(/\s+/); authedUser = { name:{ first_name:parts[0]||'', last_name:parts.slice(1).join(' ')||'' }, email_addresses: email }; localStorage.setItem('stytch_user', JSON.stringify(authedUser)); updateAuthUI(); return true; }catch{ return false; } }
 
@@ -182,6 +200,14 @@ const myName =()=> displayNameFor(authedUser);
 async function getState(){ const r=await fetch(apiUrl(`state?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}); if(!r.ok) throw new Error('state'); return r.json(); }
 async function syncSince(seq){ const r=await fetch(apiUrl(`sync?workspace_id=${encodeURIComponent(WORKSPACE_ID)}&since=${seq}`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}); if(!r.ok) throw new Error('sync'); return r.json(); }
 async function postOpHTTP(op){ const r=await fetch(apiUrl('ops'), { method:'POST', headers:{ 'Authorization':`Bearer ${sessionJWT}`, 'Content-Type':'application/json' }, body: JSON.stringify({ workspace_id: WORKSPACE_ID, op }) }); if(!r.ok) throw new Error('op_failed'); const j=await r.json(); return j.seq; }
+
+/* ---------------- Shares / Members HTTP ---------------- */
+async function fetchRole(){ const r=await fetch(apiUrl(`workspaces/${encodeURIComponent(WORKSPACE_ID)}/role`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}); if(!r.ok) return 'viewer'; const j=await r.json().catch(()=>({})); return j.role||'viewer'; }
+async function listShares(){ const r=await fetch(apiUrl(`shares?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}); if(!r.ok) return []; const j=await r.json().catch(()=>({shares:[]})); return j.shares||[]; }
+async function invite(email){ return fetch(apiUrl('shares'), { method:'POST', headers:{'Authorization':`Bearer ${sessionJWT}`,'Content-Type':'application/json'}, body: JSON.stringify({ workspace_id: WORKSPACE_ID, email }) }); }
+async function patchShareRole(id, role){ return fetch(apiUrl(`shares/${id}`), { method:'PATCH', headers:{'Authorization':`Bearer ${sessionJWT}`,'Content-Type':'application/json'}, body: JSON.stringify({ role }) }); }
+async function removeShare(id){ return fetch(apiUrl(`shares/${id}`), { method:'DELETE', headers:{'Authorization':`Bearer ${sessionJWT}`}}); }
+async function transferOwner(toEmail){ return fetch(apiUrl(`workspaces/${encodeURIComponent(WORKSPACE_ID)}/transfer_owner`), { method:'POST', headers:{'Authorization':`Bearer ${sessionJWT}`,'Content-Type':'application/json'}, body: JSON.stringify({ to_email: toEmail }) }); }
 
 /* ---------------- WS ---------------- */
 function liveUrl(){ try{ const u=new URL(API_BASE); u.pathname=(u.pathname.replace(/\/+$/,'')+'/live').replace(/\/{2,}/g,'/'); u.search=`?ws=${encodeURIComponent(WORKSPACE_ID)}&token=${encodeURIComponent(sessionJWT)}`; u.protocol=u.protocol.replace('http','ws'); return u.toString(); }catch{ return null; } }
@@ -313,8 +339,7 @@ function renderTabs(){ const node=document.getElementById('tabs'); node.innerHTM
   b.dataset.tab=name; b.textContent=name;
   b.onclick=()=>{ switchTab(name); };
   b.ondblclick=()=>{ if(currentRole==='viewer') return; const nn=prompt('Rename tab:',name); if(!nn||!nn.trim()||nn===name||tabData[nn])return; enqueueOp('rename_tab', { from:name, to:nn }); };
-  b.oncontextmenu=(e)=>{ e.preventDefault(); if(currentRole==='viewer')return; if(confirm(`Delete tab "${name}"?`)){ if(activeTab===name) activeTab=Object.keys(tabData).find(t=>t!==name)||null; delete tabData[name]; renderTabs(); renderBoard(); // optional: could add an op type for delete_tab
-  } };
+  b.oncontextmenu=(e)=>{ e.preventDefault(); if(currentRole==='viewer')return; if(confirm(`Delete tab "${name}"?`)){ if(activeTab===name) activeTab=Object.keys(tabData).find(t=>t!==name)||null; delete tabData[name]; renderTabs(); renderBoard(); } };
   node.appendChild(b); }); }
 
 function switchTab(tab){ if(!tabData[tab]) return; activeTab=tab; document.querySelectorAll('.tab-button').forEach(x=>x.classList.remove('border-indigo-500','text-indigo-700','dark:text-white','font-semibold','bg-indigo-50','dark:bg-indigo-600/30')); const btn=[...document.querySelectorAll('.tab-button')].find(b=>b.dataset.tab===tab); if(btn) btn.classList.add('border-indigo-500','text-indigo-700','dark:text-white','font-semibold','bg-indigo-50','dark:bg-indigo-600/30'); renderBoard(); }
@@ -362,15 +387,23 @@ function commitReorder(taskId, fromCol, toCol, insertIndex){ if(currentRole==='v
 
 function findTask(data, id){ for (const tab of Object.keys(data||{})){ for (const c of COLS){ const hit=(data[tab][c]||[]).find(x=>x.id===id); if(hit) return hit; } } return null; }
 
-/* ---------------- Members / modal (kept minimal) ---------------- */
-function renderPresence(){ const avatars=document.getElementById('presenceAvatars'); const list=document.getElementById('presenceList'); const count=document.getElementById('presenceCount'); avatars.innerHTML=''; list.innerHTML=''; const others=[...presence.entries()].map(([id,v])=>({id,...v})).sort((a,b)=>(a.name||a.email).localeCompare(b.name||b.email)); count.textContent = others.length ? '' : '0 online'; const max=4; others.slice(0,max).forEach(p=>{ const span=document.createElement('span'); span.className='avatar inline-flex items-center justify-center h-7 w-7 rounded-full bg-indigo-600/10 text-indigo-700 dark:text-indigo-300 text-[11px] font-semibold ring-2 ring-white'; span.title=p.name||p.email; span.textContent=initials(p.name,p.email); const dot=document.createElement('span'); dot.className='presence-dot'; span.appendChild(dot); avatars.appendChild(span); const row=document.createElement('div'); row.className='flex items-center gap-2'; row.innerHTML=`<div class="relative inline-flex items-center justify-center h-6 w-6 rounded-full bg-indigo-600/10 text-indigo-700 dark:text-indigo-300 text-[10px] font-semibold">${initials(p.name,p.email)}<span class="presence-dot" style="right:-1px;bottom:-1px;width:8px;height:8px"></span></div><div class="truncate">${p.name||p.email}</div>`; list.appendChild(row); }); if(others.length>max){ const extra=others.length-max; const more=document.createElement('span'); more.className='avatar inline-flex items-center justify-center h-7 w-7 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[11px] font-semibold ring-2 ring-white'; more.textContent = `+${extra}`; avatars.appendChild(more); } }
-
-document.getElementById('presenceBtn').onclick = ()=>{ const t=document.getElementById('presenceTooltip'); t.classList.toggle('hidden'); };
+/* ---------------- Members modal ---------------- */
+function openMembers(){ document.getElementById('membersModal').classList.remove('hidden'); renderMembers(); }
+function closeMembers(){ document.getElementById('membersModal').classList.add('hidden'); }
+async function renderMembers(){ const list = document.getElementById('membersList'); list.innerHTML = '<div class="py-6 text-sm text-gray-500">Loading…</div>'; const shares = await listShares(); list.innerHTML = ''; shares.forEach(s=>{ const row=document.createElement('div'); row.className='flex items-center justify-between py-3'; const who=document.createElement('div'); who.className='flex items-center gap-3'; const bubble=document.createElement('div'); bubble.className='h-8 w-8 rounded-full bg-indigo-600/15 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-xs font-semibold'; bubble.textContent = initials('', s.email||''); const meta=document.createElement('div'); meta.innerHTML = `<div class="text-sm font-medium">${s.email||'—'}</div>`; who.appendChild(bubble); who.appendChild(meta); const actions=document.createElement('div'); actions.className='flex items-center gap-2'; if (s.role === 'owner') { const tag=document.createElement('span'); tag.className='text-xs text-gray-500'; tag.textContent='owner'; actions.appendChild(tag); } else if (currentRole==='owner' && s.id) { const sel=document.createElement('select'); sel.className='text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-800'; ['editor','viewer','owner'].forEach(r=>{ const o=document.createElement('option'); o.value=r; o.text=r; if(String(s.role||'editor')===r) o.selected=true; sel.appendChild(o); }); sel.onchange = async ()=>{ if(sel.value==='owner'){ if(!confirm(`Transfer ownership to ${s.email}? You will lose owner privileges.`)) { sel.value = s.role||'editor'; return; } const r=await transferOwner(s.email||''); if(!r.ok){ alert('Failed to transfer'); sel.value=s.role||'editor'; } else { alert('Ownership transferred'); closeMembers(); location.reload(); } return; } const r=await patchShareRole(s.id, sel.value); if(!r.ok) alert('Failed to update role'); };
+      const del=document.createElement('button'); del.className='px-2 py-1 text-xs rounded bg-red-50 text-red-600 hover:bg-red-100'; del.textContent='Remove'; del.onclick = async ()=>{ if(!confirm('Remove this member?')) return; const r=await removeShare(s.id); if(r.ok) renderMembers(); else alert('Failed to remove'); };
+      actions.appendChild(sel); actions.appendChild(del); }
+    row.appendChild(who); row.appendChild(actions); list.appendChild(row); }); }
 
 /* ---------------- Typing durable debounce ---------------- */
 const contentDebouncers = new Map();
 function scheduleContentDurable(taskId, text){ let fn=contentDebouncers.get(taskId); if(!fn){ fn=debounce((id, val)=> enqueueOp('update_task_field', { task_id:id, field:'content', value: val }), 300); contentDebouncers.set(taskId, fn); } fn(taskId, text); }
 function flushContentDurable(taskId, text){ enqueueOp('update_task_field', { task_id:taskId, field:'content', value:text }); }
+
+/* ---------------- Presence UI (avatars + tooltip) ---------------- */
+function renderPresence(){ const avatars=document.getElementById('presenceAvatars'); const list=document.getElementById('presenceList'); const count=document.getElementById('presenceCount'); avatars.innerHTML=''; list.innerHTML=''; const others=[...presence.entries()].map(([id,v])=>({id,...v})).sort((a,b)=>(a.name||a.email).localeCompare(b.name||b.email)); count.textContent = others.length ? '' : '0 online'; const max=4; others.slice(0,max).forEach(p=>{ const span=document.createElement('span'); span.className='avatar inline-flex items-center justify-center h-7 w-7 rounded-full bg-indigo-600/10 text-indigo-700 dark:text-indigo-300 text-[11px] font-semibold ring-2 ring-white'; span.title=p.name||p.email; span.textContent=initials(p.name,p.email); const dot=document.createElement('span'); dot.className='presence-dot'; span.appendChild(dot); avatars.appendChild(span); const row=document.createElement('div'); row.className='flex items-center gap-2'; row.innerHTML=`<div class="relative inline-flex items-center justify-center h-6 w-6 rounded-full bg-indigo-600/10 text-indigo-700 dark:text-indigo-300 text-[10px] font-semibold">${initials(p.name,p.email)}<span class="presence-dot" style="right:-1px;bottom:-1px;width:8px;height:8px"></span></div><div class="truncate">${p.name||p.email}</div>`; list.appendChild(row); }); if(others.length>max){ const extra=others.length-max; const more=document.createElement('span'); more.className='avatar inline-flex items-center justify-center h-7 w-7 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[11px] font-semibold ring-2 ring-white'; more.textContent = `+${extra}`; avatars.appendChild(more); } }
+
+document.getElementById('presenceBtn').onclick = ()=>{ const t=document.getElementById('presenceTooltip'); t.classList.toggle('hidden'); };
 
 /* ---------------- Boot ---------------- */
 function setReportsHref(){ const btn=document.getElementById('reportsLink'); if(btn){ btn.onclick=()=>{ if(!WORKSPACE_ID){ alert('Open a workspace first.'); return; } location.href=`reports.html?ws=${encodeURIComponent(WORKSPACE_ID)}`; }; } const logo=document.getElementById('workspacesLink'); if(logo){ logo.href='workspace.html'; } }
@@ -378,7 +411,7 @@ function setReportsHref(){ const btn=document.getElementById('reportsLink'); if(
 async function boot(){ const ok = await verifySessionAndHydrate(); if(!ok){ location.replace('/sign-in.html'); return; }
   const url=new URL(location.href); WORKSPACE_ID = url.searchParams.get('ws') || localStorage.getItem('solara_last_ws') || ''; if(!WORKSPACE_ID){ document.getElementById('wsBanner').classList.remove('hidden'); } else { localStorage.setItem('solara_last_ws', WORKSPACE_ID); }
   // Role + Name
-  try { const r=await fetch(apiUrl(`workspaces/${encodeURIComponent(WORKSPACE_ID)}/role`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}); currentRole = r.ok ? (await r.json()).role || 'viewer' : 'viewer'; } catch { currentRole='viewer'; }
+  currentRole = await fetchRole();
   // Workspace name
   try { const wlist = await fetch(apiUrl('workspaces'), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}).then(r=>r.ok?r.json():{workspaces:[]}).catch(()=>({workspaces:[]})); const wsRow=(wlist.workspaces||[]).find(w=>w.id===WORKSPACE_ID); WORKSPACE_NAME = wsRow?.name||''; document.getElementById('wsName').textContent = WORKSPACE_NAME || '—'; if (wsRow && wsRow.owner_id && currentRole !== 'owner' && wsRow.owner_id === currentUserKey) currentRole = 'owner'; } catch{}
 
@@ -396,14 +429,21 @@ async function boot(){ const ok = await verifySessionAndHydrate(); if(!ok){ loca
   setReportsHref();
 }
 
+// Footer + Menu bindings
+
 document.getElementById('addTabBtn').onclick = ()=>{ if(currentRole==='viewer') return; const name=prompt('Enter tab name:'); if(!name||!name.trim()) return; const n=name.trim(); if(tabData[n]) return switchTab(n); tabData[n]={ todo:[], inprogress:[], done:[] }; renderTabs(); switchTab(n); };
 document.getElementById('newTaskBtn').onclick = ()=>{ if(currentRole==='viewer') return; const id=`task-${cryptoId()}`; const t={ id, content:'', dueDate:'', priority:'Medium', pos:(tabData[activeTab].todo.slice(-1)[0]?.pos||0)+1, upd:Date.now(), by:currentUserKey }; enqueueOp('create_task', { tab: activeTab, column:'todo', task: t }); };
 document.getElementById('clearBtn').onclick = ()=>{ if(currentRole==='viewer') return; if(!activeTab) return; if(!confirm('Clear all tasks in this tab?')) return; const data=tabData[activeTab]; [...data.todo, ...data.inprogress, ...data.done].forEach(t=> enqueueOp('delete_task', { task_id: t.id })); };
 document.getElementById('exportBtn').onclick = ()=>{ const board=document.getElementById('board'); html2pdf().set({ margin:.5, filename:'Solara-Board.pdf', image:{type:'jpeg',quality:.98}, html2canvas:{scale:2}, jsPDF:{unit:'in', format:'letter', orientation:'landscape'} }).from(board).save(); };
 
+document.getElementById('manageBtn').onclick = ()=>{ if(!WORKSPACE_ID){ alert('Open a workspace first.'); return; } openMembers(); };
+document.getElementById('inviteBtn').onclick = async ()=>{ const input=document.getElementById('inviteEmail'); const email=(input.value||'').trim().toLowerCase(); if(!email) return; const r=await invite(email); if(r.ok){ input.value=''; renderMembers(); alert('Invitation created.'); } else { alert('Invite failed.'); } };
+
 document.getElementById('userButton').onclick = ()=> document.getElementById('userMenu').classList.toggle('hidden');
-document.getElementById('addUserBtn').onclick = ()=> alert('Open the members panel from the footer gear icon in this build.');
+document.getElementById('addUserBtn').onclick = ()=> openMembers();
 document.getElementById('signOutBtn').onclick = async ()=>{ try{ if(sessionJWT){ await fetch(apiUrl('logout'), { method:'POST', headers:{ 'Authorization':`Bearer ${sessionJWT}` } }).catch(()=>{}); } } finally { localStorage.removeItem('stytch_session_jwt'); localStorage.removeItem('solara_session_jwt'); location.replace('/sign-in.html'); } };
+
+document.addEventListener('keydown', (e)=>{ if(e.key==='Escape') closeMembers(); });
 
 document.addEventListener('DOMContentLoaded', boot);
 </script>
