@@ -130,46 +130,21 @@
   </footer>
 </div>
 
-  <!-- Manage Members Modal -->
-<div id="manageModal" class="hidden fixed inset-0 z-[100]">
-  <div id="manageBackdrop" class="absolute inset-0 bg-black/40"></div>
-
-  <!-- anchored near footer so it feels attached to the cog -->
-  <div role="dialog" aria-modal="true" aria-labelledby="manageTitle"
-       class="absolute right-6 bottom-24 w-[420px] max-h-[70vh] overflow-hidden rounded-2xl
-              bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 shadow-2xl">
-    <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
-      <div class="flex items-center gap-2">
-        <h3 id="manageTitle" class="text-sm font-semibold">Members</h3>
-        <span id="memberCount" class="text-xs text-gray-500"></span>
-      </div>
-      <button id="manageCloseBtn" class="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800" title="Close">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 18L18 6M6 6l12 12"/></svg>
+  <!-- Members Modal (unchanged behavior) -->
+<div id="membersModal" class="hidden fixed inset-0 z-[60] flex items-center justify-center">
+  <div class="absolute inset-0 bg-black/40" onclick="closeMembers()"></div>
+  <div class="relative w-full max-w-lg rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-5 shadow-xl">
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="text-lg font-semibold">Workspace Members</h3>
+      <button class="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800" onclick="closeMembers()" title="Close">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
-
-    <div class="p-4 space-y-4">
-      <!-- Invite link -->
-      <div>
-        <label class="block text-xs text-gray-500 mb-1">Invite link</label>
-        <div class="flex items-center gap-2">
-          <input id="inviteLink" type="text" readonly
-                 class="flex-1 text-xs rounded border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 px-2 py-1">
-          <button id="copyInviteBtn" class="text-xs px-2 py-1 rounded bg-indigo-600 text-white hover:bg-indigo-500">
-            Copy
-          </button>
-        </div>
-        <p class="mt-1 text-[11px] text-gray-500">Anyone with access must still sign in. The link opens this workspace.</p>
-      </div>
-
-      <div class="border-t border-gray-200 dark:border-gray-700"></div>
-
-      <!-- Online members -->
-      <div>
-        <div class="text-xs font-medium text-gray-600 dark:text-gray-300 mb-2">Online now</div>
-        <div id="memberList" class="space-y-2 max-h-[34vh] overflow-auto"></div>
-      </div>
+    <div class="flex gap-2 mb-3">
+      <input id="inviteEmail" type="email" placeholder="name@example.com" class="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm"/>
+      <button id="inviteBtn" class="px-3 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 text-sm">Invite</button>
     </div>
+    <div id="membersList" class="divide-y divide-gray-200 dark:divide-gray-700"></div>
   </div>
 </div>
 
@@ -379,78 +354,208 @@ function createTaskElement(id, content='', dueDate='', priority='Medium', column
   const del=document.createElement('button'); del.className='absolute top-2 right-2 text-gray-400 hover:text-red-500'; del.innerHTML='<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 18L18 6M6 6l12 12"/></svg>'; del.title='Delete Task'; del.onclick=()=>{ if(currentRole==='viewer')return; if(confirm('Delete this task?')) enqueueOp('delete_task', { task_id:id }); };
 
   /* ---------------- Manage Members (modal) ---------------- */
-function openManageModal(){
-  if (!WORKSPACE_ID) { alert('Open a workspace first.'); return; }
-
-  // Build an invite link that preserves current page but injects the workspace id
-  const u = new URL(location.href);
-  u.searchParams.set('ws', WORKSPACE_ID);
-  document.getElementById('inviteLink').value = u.toString();
-
-  renderManageMembers();
-  document.getElementById('manageModal').classList.remove('hidden');
-
-  // focus the Copy button for quick keyboard flow
-  setTimeout(()=> document.getElementById('copyInviteBtn')?.focus(), 0);
+async function fetchRole(){
+  try{
+    const r=await fetch(apiUrl(`workspaces/${encodeURIComponent(WORKSPACE_ID)}/role`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }});
+    if(!r.ok) return currentRole || 'viewer';
+    const j=await r.json().catch(()=>({}));
+    return j.role || 'viewer';
+  }catch{ return currentRole || 'viewer'; }
 }
-function closeManageModal(){
-  document.getElementById('manageModal').classList.add('hidden');
+async function listShares(){
+  try{
+    const r=await fetch(apiUrl(`shares?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }});
+    if(!r.ok) return [];
+    const j=await r.json().catch(()=>({shares:[]}));
+    return j.shares || [];
+  }catch{ return []; }
 }
-async function copyInvite(){
-  const el = document.getElementById('inviteLink');
-  try {
-    await navigator.clipboard.writeText(el.value);
-  } catch {
-    el.select();
-    document.execCommand('copy');
+async function invite(email){
+  return fetch(apiUrl('shares'), {
+    method:'POST',
+    headers:{ 'Authorization':`Bearer ${sessionJWT}`, 'Content-Type':'application/json' },
+    body: JSON.stringify({ workspace_id: WORKSPACE_ID, email })
+  });
+}
+async function patchShareRole(id, role){
+  return fetch(apiUrl(`shares/${id}`), {
+    method:'PATCH',
+    headers:{ 'Authorization':`Bearer ${sessionJWT}`, 'Content-Type':'application/json' },
+    body: JSON.stringify({ role })
+  });
+}
+async function removeShare(id){
+  return fetch(apiUrl(`shares/${id}`), {
+    method:'DELETE',
+    headers:{ 'Authorization':`Bearer ${sessionJWT}` }
+  });
+}
+async function transferOwner(toEmail){
+  return fetch(apiUrl(`workspaces/${encodeURIComponent(WORKSPACE_ID)}/transfer_owner`), {
+    method:'POST',
+    headers:{ 'Authorization':`Bearer ${sessionJWT}`, 'Content-Type':'application/json' },
+    body: JSON.stringify({ to_email: toEmail })
+  });
+}
+
+/* ---------- Modal open/close ---------- */
+function openMembers(){
+  const m=document.getElementById('membersModal');
+  if(!m){ console.error('membersModal not found'); return; }
+  m.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+  renderMembers();
+}
+function closeMembers(){
+  const m=document.getElementById('membersModal');
+  if(!m) return;
+  m.classList.add('hidden');
+  document.body.style.overflow = '';
+}
+
+/* Close on ESC */
+document.addEventListener('keydown', (e)=>{
+  const m=document.getElementById('membersModal');
+  if(e.key==='Escape' && m && !m.classList.contains('hidden')) closeMembers();
+});
+
+/* ---------- UI render ---------- */
+async function renderMembers(){
+  const list = document.getElementById('membersList');
+  if(!list) return;
+  list.innerHTML = '<div class="py-6 text-sm text-gray-500">Loading…</div>';
+
+  // Ensure the currentRole is up to date
+  try { currentRole = await fetchRole(); } catch {}
+
+  const shares = await listShares();
+  if(!Array.isArray(shares) || shares.length===0){
+    list.innerHTML = '<div class="py-6 text-sm text-gray-500">No members yet. Invite someone above.</div>';
+    return;
   }
-}
-
-function renderManageMembers(){
-  const list = document.getElementById('memberList');
-  const count = document.getElementById('memberCount');
-  if (!list || !count) return;
-
-  const online = [...presence.entries()]
-    .map(([id, v])=> ({ id, name: v.name||v.email||'User', email: v.email||'' }))
-    .sort((a,b)=> a.name.localeCompare(b.name));
-
-  count.textContent = `${online.length} online`;
 
   list.innerHTML = '';
-  online.forEach(p=>{
-    const row = document.createElement('div');
-    row.className = 'flex items-center justify-between gap-2';
-    row.innerHTML = `
-      <div class="flex items-center gap-2 min-w-0">
-        <div class="relative inline-flex items-center justify-center h-7 w-7 rounded-full bg-indigo-600/10 text-indigo-700 dark:text-indigo-300 text-[11px] font-semibold">
-          ${initials(p.name,p.email)}
-          <span class="presence-dot" style="right:-1px;bottom:-1px;width:8px;height:8px"></span>
-        </div>
-        <div class="min-w-0">
-          <div class="text-sm truncate">${p.name}</div>
-          <div class="text-[11px] text-gray-500 truncate">${p.email||''}</div>
-        </div>
-      </div>
-      <div class="text-[11px] text-green-600">online</div>
-    `;
+  shares.forEach(s=>{
+    const row=document.createElement('div');
+    row.className='flex items-center justify-between py-3';
+
+    const who=document.createElement('div');
+    who.className='flex items-center gap-3';
+
+    const bubble=document.createElement('div');
+    bubble.className='h-8 w-8 rounded-full bg-indigo-600/15 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-xs font-semibold';
+    bubble.textContent = initials('', s.email||'');
+
+    const meta=document.createElement('div');
+    const nameLine = `<div class="text-sm font-medium">${s.email||'—'}</div>`;
+    const small = `<div class="text-xs text-gray-500">${s.role||'editor'}</div>`;
+    meta.innerHTML = nameLine + small;
+
+    who.appendChild(bubble);
+    who.appendChild(meta);
+
+    const actions=document.createElement('div');
+    actions.className='flex items-center gap-2';
+
+    // Owner tag is immutable
+    if (String(s.role) === 'owner') {
+      const tag=document.createElement('span');
+      tag.className='text-xs text-gray-500';
+      tag.textContent='owner';
+      actions.appendChild(tag);
+    } else if (currentRole==='owner' && s.id) {
+      // Editable role select for owner
+      const sel=document.createElement('select');
+      sel.className='text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-800';
+      ['editor','viewer','owner'].forEach(r=>{
+        const o=document.createElement('option');
+        o.value=r; o.text=r;
+        if(String(s.role||'editor')===r) o.selected=true;
+        sel.appendChild(o);
+      });
+      sel.onchange = async ()=>{
+        const value = sel.value;
+        if(value==='owner'){
+          if(!confirm(`Transfer ownership to ${s.email}? You will lose owner privileges for this workspace.`)) {
+            sel.value = s.role||'editor';
+            return;
+          }
+          const r=await transferOwner(s.email||'');
+          if(!r.ok){
+            alert('Failed to transfer ownership.');
+            sel.value=s.role||'editor';
+          } else {
+            alert('Ownership transferred. Reloading…');
+            closeMembers();
+            location.reload();
+          }
+          return;
+        }
+        const r=await patchShareRole(s.id, value);
+        if(!r.ok) alert('Failed to update role.');
+        else meta.innerHTML = `<div class="text-sm font-medium">${s.email||'—'}</div><div class="text-xs text-gray-500">${value}</div>`;
+      };
+
+      const del=document.createElement('button');
+      del.className='px-2 py-1 text-xs rounded bg-red-50 text-red-600 hover:bg-red-100';
+      del.textContent='Remove';
+      del.onclick = async ()=>{
+        if(!confirm('Remove this member from the workspace?')) return;
+        const r=await removeShare(s.id);
+        if(r.ok) renderMembers(); else alert('Failed to remove member.');
+      };
+
+      actions.appendChild(sel);
+      actions.appendChild(del);
+    } else {
+      // Non-owner viewers/editors just see a small role tag
+      const tag=document.createElement('span');
+      tag.className='text-xs text-gray-500';
+      tag.textContent=s.role||'editor';
+      actions.appendChild(tag);
+    }
+
+    row.appendChild(who);
+    row.appendChild(actions);
     list.appendChild(row);
   });
 }
 
-// Hook up the cog + modal controls
-document.getElementById('manageBtn').addEventListener('click', openManageModal);
-document.getElementById('manageBackdrop').addEventListener('click', closeManageModal);
-document.getElementById('manageCloseBtn').addEventListener('click', closeManageModal);
-document.getElementById('copyInviteBtn').addEventListener('click', copyInvite);
-document.addEventListener('keydown', (e)=>{ if(e.key==='Escape') closeManageModal(); });
+/* ---------- Invite ---------- */
+const inviteBtn = document.getElementById('inviteBtn');
+if(inviteBtn){
+  inviteBtn.onclick = async ()=>{
+    const input=document.getElementById('inviteEmail');
+    const email=(input?.value||'').trim().toLowerCase();
+    if(!email) return;
+    const r=await invite(email);
+    if(r.ok){
+      input.value='';
+      await renderMembers();
+      alert('Invitation created.');
+    }else{
+      alert('Invite failed.');
+    }
+  };
+}
+const inviteEmailInput = document.getElementById('inviteEmail');
+if(inviteEmailInput){
+  inviteEmailInput.addEventListener('keydown', (e)=>{
+    if(e.key==='Enter') inviteBtn?.click();
+  });
+}
 
-// Keep the modal’s member list live if it’s open
-const _oldRenderPresence = renderPresence;
-renderPresence = function(){
-  _oldRenderPresence();
-  const modal = document.getElementById('manageModal');
-  if (modal && !modal.classList.contains('hidden')) renderManageMembers();
+/* ---------- Wire up buttons ---------- */
+const manageBtn = document.getElementById('manageBtn');
+if(manageBtn) manageBtn.onclick = ()=> {
+  if(!WORKSPACE_ID){ alert('Open a workspace first.'); return; }
+  openMembers();
+};
+
+const addUserBtn = document.getElementById('addUserBtn');
+if(addUserBtn) addUserBtn.onclick = ()=> {
+  if(!WORKSPACE_ID){ alert('Open a workspace first.'); return; }
+  openMembers();
 };
                                                                                      
   // Smooth typing: awareness + deltas + durable debounce
@@ -480,10 +585,6 @@ function commitReorder(taskId, fromCol, toCol, insertIndex){ if(currentRole==='v
 
 function findTask(data, id){ for (const tab of Object.keys(data||{})){ for (const c of COLS){ const hit=(data[tab][c]||[]).find(x=>x.id===id); if(hit) return hit; } } return null; }
 
-/* ---------------- Members / modal (kept minimal) ---------------- */
-function renderPresence(){ const avatars=document.getElementById('presenceAvatars'); const list=document.getElementById('presenceList'); const count=document.getElementById('presenceCount'); avatars.innerHTML=''; list.innerHTML=''; const others=[...presence.entries()].map(([id,v])=>({id,...v})).sort((a,b)=>(a.name||a.email).localeCompare(b.name||b.email)); count.textContent = others.length ? '' : '0 online'; const max=4; others.slice(0,max).forEach(p=>{ const span=document.createElement('span'); span.className='avatar inline-flex items-center justify-center h-7 w-7 rounded-full bg-indigo-600/10 text-indigo-700 dark:text-indigo-300 text-[11px] font-semibold ring-2 ring-white'; span.title=p.name||p.email; span.textContent=initials(p.name,p.email); const dot=document.createElement('span'); dot.className='presence-dot'; span.appendChild(dot); avatars.appendChild(span); const row=document.createElement('div'); row.className='flex items-center gap-2'; row.innerHTML=`<div class="relative inline-flex items-center justify-center h-6 w-6 rounded-full bg-indigo-600/10 text-indigo-700 dark:text-indigo-300 text-[10px] font-semibold">${initials(p.name,p.email)}<span class="presence-dot" style="right:-1px;bottom:-1px;width:8px;height:8px"></span></div><div class="truncate">${p.name||p.email}</div>`; list.appendChild(row); }); if(others.length>max){ const extra=others.length-max; const more=document.createElement('span'); more.className='avatar inline-flex items-center justify-center h-7 w-7 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[11px] font-semibold ring-2 ring-white'; more.textContent = `+${extra}`; avatars.appendChild(more); } }
-
-document.getElementById('presenceBtn').onclick = ()=>{ const t=document.getElementById('presenceTooltip'); t.classList.toggle('hidden'); };
 
 /* ---------------- Typing durable debounce ---------------- */
 const contentDebouncers = new Map();
