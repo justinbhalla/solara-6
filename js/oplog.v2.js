@@ -1,0 +1,171 @@
+// oplog.v2.js — client-side op-log + reducers (fixed)
+import { state, COLS } from './state.js';
+import { normalizeDateString, cryptoId, debounce, stampSync, fire } from './utils.js';
+
+// HTTP helpers for ops + sync
+async function postOpHTTP(op){
+  const r = await fetch(state.apiUrl('ops'), { method:'POST', headers:{ 'Authorization':`Bearer ${state.sessionJWT}`, 'Content-Type':'application/json' }, body: JSON.stringify({ workspace_id: state.WORKSPACE_ID, op }) });
+  if(!r.ok) throw new Error('op_failed');
+  const j = await r.json();
+  return j.seq;
+}
+export async function getState(){
+  const r=await fetch(state.apiUrl(`state?workspace_id=${encodeURIComponent(state.WORKSPACE_ID)}`), { headers:{ 'Authorization':`Bearer ${state.sessionJWT}` }});
+  if(!r.ok) throw new Error('state');
+  return r.json();
+}
+export async function syncSince(seq){
+  const r=await fetch(state.apiUrl(`sync?workspace_id=${encodeURIComponent(state.WORKSPACE_ID)}&since=${seq}`), { headers:{ 'Authorization':`Bearer ${state.sessionJWT}` }});
+  if(!r.ok) throw new Error('sync');
+  return r.json();
+}
+
+// Op id
+function nextOpId(){ return `${state.currentUserKey||'me'}:${++state.opCounter}`; }
+
+export function enqueueOp(type, payload){
+  const op={ op_id: nextOpId(), client_id: state.currentUserKey, base_seq: state.lastSeq, ts: Date.now(), type, payload };
+  state.pendingOps.push(op);
+  applyOpLocal(op, /*fromRemote*/false);
+  flushOpQueue();
+}
+
+export async function flushOpQueue(){
+  if (state.pendingOps.length===0) return;
+  const q = state.pendingOps.slice();
+  state.pendingOps = [];
+  for (const op of q){
+    state.sentButUnacked.set(op.op_id, op);
+    if (state.wsConnected && state.ws && state.ws.readyState===1){
+      try { state.ws.send(JSON.stringify({ type:'op:append', ws: state.WORKSPACE_ID, op })); } catch {}
+    } else {
+      try { const seq = await postOpHTTP(op); state.sentButUnacked.delete(op.op_id); if (seq > state.lastSeq) state.lastSeq = seq; stampSync(); }
+      catch { state.pendingOps.unshift(op); break; }
+    }
+  }
+}
+
+export function applySyncResponse(resp){
+  if (resp.mode==='snapshot'){
+    state.tabData = sanitizeTabs(resp.tabs||{});
+    state.lastSeq = Number(resp.base_seq||0);
+    fire('render:all');
+    stampSync();
+    return;
+  }
+  if (resp.mode==='ops'){
+    for (const it of (resp.ops||[])){
+      if (it.seq !== state.lastSeq+1){
+        // gap -> force snapshot
+        getState().then(s=>{ state.tabData=sanitizeTabs(s.tabs||{}); state.lastSeq=Number(s.base_seq||0); fire('render:all'); }).catch(()=>{});
+        return;
+      }
+      if (!state.sentButUnacked.has(it.op_id)) applyOpLocal({ ...it }, true);
+      else state.sentButUnacked.delete(it.op_id);
+      state.lastSeq = it.seq;
+    }
+    stampSync();
+  }
+}
+
+export function sanitizeTabs(tabs){
+  const out={};
+  Object.keys(tabs||{}).forEach(tab=>{
+    out[tab] = { todo:[], inprogress:[], done:[] };
+    COLS.forEach(c=>{
+      const list = Array.isArray(tabs[tab]?.[c]) ? tabs[tab][c] : [];
+      const norm=list.map(t=>normalizeTask(t));
+      norm.sort((a,b)=> (a.pos||0)-(b.pos||0));
+      norm.forEach((t,i)=> t.pos=i+1);
+      out[tab][c]=norm;
+    });
+  });
+  return out;
+}
+
+export function normalizeTask(t){
+  return {
+    id: String(t.id||'').trim() || `task-${cryptoId()}`,
+    content: typeof t.content==='string'?t.content:'',
+    dueDate: (/^\d{4}-\d{2}-\d{2}$/.test(t.dueDate||''))?t.dueDate:'',
+    priority: ['High','Medium','Low'].includes(t.priority)?t.priority:'Medium',
+    pos: Number.isFinite(+t.pos)?+t.pos:0,
+    upd: Number.isFinite(+t.upd)?+t.upd:Date.now(),
+    by: t.by||null,
+  };
+}
+
+export function findTask(data, id){
+  for (const tab of Object.keys(data||{})){
+    for (const c of COLS){ const hit=(data[tab][c]||[]).find(x=>x.id===id); if(hit) return hit; }
+  }
+  return null;
+}
+
+export function applyOpLocal(op, fromRemote){
+  const p = op.payload||{};
+  function ensureTab(name){ if (!state.tabData[name]) state.tabData[name]={ todo:[], inprogress:[], done:[] }; COLS.forEach(c=>{ if(!Array.isArray(state.tabData[name][c])) state.tabData[name][c]=[]; }); }
+  function reindex(list){ list.forEach((t,i)=> t.pos=i+1); }
+
+  if (op.type==='create_task'){
+    const tab = String(p.tab||state.activeTab||'Default'); ensureTab(tab);
+    const col = COLS.includes(p.column)?p.column:'todo';
+    const task = normalizeTask(p.task||{ id:`task-${cryptoId()}` });
+    const list = state.tabData[tab][col];
+    if (Number.isFinite(+task.pos)) { let idx=list.findIndex(x=>x.pos>task.pos); if(idx<0) idx=list.length; list.splice(idx,0,task); reindex(list); }
+    else { task.pos=(list[list.length-1]?.pos||0)+1; list.push(task); }
+    fire('render:board');
+    return;
+  }
+
+  if (op.type==='update_task_field'){
+    const id=String(p.task_id||''); const field=String(p.field||'');
+    for (const tab of Object.keys(state.tabData)){
+      for (const c of COLS){ const list=state.tabData[tab][c]; const t=list.find(x=>x.id===id); if (t){
+        if (field==='content') t.content = String(p.value||'');
+        else if (field==='dueDate') t.dueDate = normalizeDateString(p.value);
+        else if (field==='priority' && ['High','Medium','Low'].includes(p.value)) t.priority = p.value;
+        t.upd = op.ts; t.by = op.client_id;
+        fire('render:task', { id });
+        return;
+      } }
+    }
+    return;
+  }
+
+  if (op.type==='move_task'){
+    const id=String(p.task_id||''); const to=COLS.includes(p.to)?p.to:'todo'; const pos=Number.isFinite(+p.pos)?+p.pos:null;
+    let foundTab=null, fromCol=null, idx=-1, task=null;
+    for (const tb of Object.keys(state.tabData)){
+      for (const c of COLS){ const i=state.tabData[tb][c].findIndex(x=>x.id===id); if(i!==-1){ foundTab=tb; fromCol=c; idx=i; task=state.tabData[tb][c][i]; break; } }
+      if (task) break;
+    }
+    if(!task) return;
+    state.tabData[foundTab][fromCol].splice(idx,1); reindex(state.tabData[foundTab][fromCol]);
+    const list = state.tabData[foundTab][to]; if (pos==null) { task.pos=(list[list.length-1]?.pos||0)+1; list.push(task); } else { let insertAt=list.findIndex(x=>x.pos>pos); if(insertAt<0) insertAt=list.length; task.pos=pos; list.splice(insertAt,0,task); reindex(list); }
+    task.upd=op.ts; task.by=op.client_id; fire('render:board'); return;
+  }
+
+  if (op.type==='delete_task'){
+    const id=String(p.task_id||'');
+    for (const tab of Object.keys(state.tabData)){
+      for (const c of COLS){ const i=state.tabData[tab][c].findIndex(x=>x.id===id); if(i!==-1){ state.tabData[tab][c].splice(i,1); fire('render:board'); return; } }
+    }
+    return;
+  }
+
+  if (op.type==='rename_tab'){
+    const from=String(p.from||''); const to=String(p.to||''); if(!from||!to||from===to) return; if(!state.tabData[from]||state.tabData[to]) return; state.tabData[to]=state.tabData[from]; delete state.tabData[from]; if(state.activeTab===from) state.activeTab=to; fire('render:tabs'); fire('render:board'); return;
+  }
+}
+
+// content durable debounce utilities
+export const scheduleContentDurable = (()=>{
+  const cache = new Map();
+  return (taskId, text)=>{
+    let fn = cache.get(taskId);
+    if(!fn){ fn = debounce((id,val)=> enqueueOp('update_task_field', { task_id:id, field:'content', value: val }), 300); cache.set(taskId, fn); }
+    fn(taskId, text);
+  };
+})();
+export function flushContentDurable(taskId, text){ enqueueOp('update_task_field', { task_id:taskId, field:'content', value:text }); }

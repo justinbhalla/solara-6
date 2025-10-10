@@ -1,0 +1,12 @@
+
+.drag-over{ background:rgba(99,102,241,.08); outline:2px dashed #6366f1; outline-offset:-2px }
+.menu-card{ box-shadow:0 10px 20px rgba(0,0,0,.08) }
+.editable{ outline:none; min-height:1.5rem }
+.dragging{ opacity:.6; transform:rotate(.4deg) }
+.drop-indicator{ height:.5rem; border-radius:.25rem; background:rgba(99,102,241,.45); margin:.25rem 0; display:none }
+.show-drop .drop-indicator{ display:block }
+.date-badge{ font-variant-numeric: tabular-nums }
+.presence-dot{ position:absolute; right:-2px; bottom:-2px; width:10px; height:10px; border-radius:999px; background:#10b981; border:2px solid white }
+.avatar{ position:relative }
+footer .slot{ min-width:0 }
+.typing-pill { transform: translateZ(0); will-change: opacity, transform; }
