@@ -1,4 +1,14 @@
-<!-- Solara v11.0 — Local‑first UI + Op‑log Client (ephemeral awareness + durable ops) -->
+<!--
+Solara — v11 fused (Part 1 of 2)
+Purpose: Keep ALL original Solara UX (cog wheel, members mgmt, footer bar, export, tabs, drag-drop, due dates, priorities, presence tooltip, reports link, etc.) AND gain the new v11 local‑first op‑log + awareness (typing pill) + durable debounced updates + WS/HTTP hybrid sync.
+
+How to assemble:
+1) Use THIS file as your main page (solara.html).
+2) Open the companion canvas/file: “Solara — v11 fused (Part 2 of 2)”. Copy its single <script> block.
+3) Paste that Part‑2 <script> **right AFTER** the closing </script> tag in THIS file (and before </body>).
+That’s it. One single HTML will then contain everything.
+-->
+
 <!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
@@ -17,7 +27,7 @@
     .date-badge{ font-variant-numeric: tabular-nums }
     .presence-dot{ position:absolute; right:-2px; bottom:-2px; width:10px; height:10px; border-radius:999px; background:#10b981; border:2px solid white }
     .avatar{ position:relative }
-    footer .slot{ min-width:0 }
+    footer .slot{ min-width: 0 }
     .typing-pill { transform: translateZ(0); will-change: opacity, transform; }
   </style>
 </head>
@@ -130,7 +140,7 @@
   </footer>
 </div>
 
-  <!-- Members Modal (unchanged behavior) -->
+<!-- Members Modal -->
 <div id="membersModal" class="hidden fixed inset-0 z-[60] flex items-center justify-center">
   <div class="absolute inset-0 bg-black/40" onclick="closeMembers()"></div>
   <div class="relative w-full max-w-lg rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-5 shadow-xl">
@@ -148,12 +158,19 @@
   </div>
 </div>
 
+<!-- ======================= SCRIPT — PART 1/2 ======================= -->
 <script>
-/* ---------------- CONFIG ---------------- */
-const API_BASE = "https://withered-disk-2405.justinbhalla28.workers.dev"; // set to your Worker URL
-const apiUrl = p => API_BASE.replace(/\/+$/,'') + '/' + String(p||'').replace(/^\/+/,'');
+/*********************
+ * CONFIG & ENDPOINTS *
+ *********************/
+// Pick the op-log Worker base (v11). You can switch to your live URL.
+const API_BASE = "https://withered-disk-2405.justinbhalla28.workers.dev"; // v11 op-log capable
+// If you need to fall back to the older tabs HTTP Worker, set API_BASE to that URL instead.
+const apiUrl = p => API_BASE.replace(/\/+$/,'') + '/' + String(p||'').replace(/^\/+,'');
 
-/* ---------------- STATE ---------------- */
+/************
+ * GLOBALS  *
+ ************/
 let WORKSPACE_ID = '';
 let WORKSPACE_NAME = '';
 let sessionJWT = null;
@@ -178,7 +195,11 @@ let presence = new Map();
 // UX flags
 let isEditing = false; let isDragging = false; let editingTasks = new Set(); let hasRemoteDuringEdit = false;
 
-/* ---------------- UTIL ---------------- */
+const COLS=['todo','inprogress','done'];
+
+/************
+ * UTIL     *
+ ************/
 const debounce = (fn, ms=400)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; };
 function getSessionJWT(){ const m = document.cookie.match(/(?:^|; )(?:stytch_session_jwt|solara_session_jwt)=([^;]+)/); return m ? decodeURIComponent(m[1]) : (localStorage.getItem('stytch_session_jwt') || localStorage.getItem('solara_session_jwt') || null); }
 function initials(name,email){ const parts=(name||'').trim().split(/\s+/).filter(Boolean); return parts.length?parts.slice(0,2).map(s=>s[0]).join('').toUpperCase():(email||'?').slice(0,2).toUpperCase(); }
@@ -186,22 +207,30 @@ function normalizeDateString(v){ if(!v) return ''; if(/^\d{4}-\d{2}-\d{2}$/.test
 function stampSync(){ document.getElementById('lastSynced').textContent = 'Last synced: ' + new Date().toLocaleTimeString(); }
 function cryptoId(){ try{ return crypto.randomUUID(); }catch{ return Math.random().toString(36).slice(2); } }
 
-/* ---------------- AUTH ---------------- */
+/************
+ * AUTH UI  *
+ ************/
 function displayNameFor(u){ const f=u?.name?.first_name, l=u?.name?.last_name, e=u?.email_addresses?.[0]?.email_address; return [f,l].filter(Boolean).join(' ') || e || 'User'; }
 function updateAuthUI(){ const name=displayNameFor(authedUser); const email=authedUser?.email_addresses?.[0]?.email_address||''; document.getElementById('avatar').textContent = initials(name,email); document.getElementById('userName').textContent = name; document.getElementById('userEmail').textContent = email; }
 async function verifySessionAndHydrate(){ sessionJWT = getSessionJWT(); if(!sessionJWT) return false; try{ const r = await fetch(apiUrl('auth/check'), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}); if(!r.ok) return false; const data = await r.json(); currentUserKey = data.user_id; const email = data.email ? [{ email_address: data.email }] : []; const parts = (data.name||'').split(/\s+/); authedUser = { name:{ first_name:parts[0]||'', last_name:parts.slice(1).join(' ')||'' }, email_addresses: email }; localStorage.setItem('stytch_user', JSON.stringify(authedUser)); updateAuthUI(); return true; }catch{ return false; } }
 
-/* ---------------- COLORS ---------------- */
+/****************
+ * COLORS / ID  *
+ ****************/
 const colorForUser=(id)=>{ const palette=['#ef4444','#10b981','#3b82f6','#f59e0b','#8b5cf6','#06b6d4']; let h=0; for(let i=0;i<id.length;i++) h=(h*31+id.charCodeAt(i))|0; return palette[Math.abs(h)%palette.length]; };
 const myColor=()=> colorForUser(currentUserKey||'me');
 const myName =()=> displayNameFor(authedUser);
 
-/* ---------------- HTTP helpers ---------------- */
+/*****************
+ * HTTP HELPERS  *
+ *****************/
 async function getState(){ const r=await fetch(apiUrl(`state?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}); if(!r.ok) throw new Error('state'); return r.json(); }
 async function syncSince(seq){ const r=await fetch(apiUrl(`sync?workspace_id=${encodeURIComponent(WORKSPACE_ID)}&since=${seq}`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}); if(!r.ok) throw new Error('sync'); return r.json(); }
 async function postOpHTTP(op){ const r=await fetch(apiUrl('ops'), { method:'POST', headers:{ 'Authorization':`Bearer ${sessionJWT}`, 'Content-Type':'application/json' }, body: JSON.stringify({ workspace_id: WORKSPACE_ID, op }) }); if(!r.ok) throw new Error('op_failed'); const j=await r.json(); return j.seq; }
 
-/* ---------------- WS ---------------- */
+/********
+ * WS   *
+ ********/
 function liveUrl(){ try{ const u=new URL(API_BASE); u.pathname=(u.pathname.replace(/\/+$/,'')+'/live').replace(/\/{2,}/g,'/'); u.search=`?ws=${encodeURIComponent(WORKSPACE_ID)}&token=${encodeURIComponent(sessionJWT)}`; u.protocol=u.protocol.replace('http','ws'); return u.toString(); }catch{ return null; } }
 function connectLive(){ const url = liveUrl(); if(!url) return; try { ws = new WebSocket(url); } catch { return; }
   ws.onopen = ()=>{ wsConnected = true; flushOpQueue(); };
@@ -211,7 +240,7 @@ function connectLive(){ const url = liveUrl(); if(!url) return; try { ws = new W
     if(msg.type==='hello'){
       presence.clear(); (msg.online||[]).forEach(p=> presence.set(p.id, { name:p.name, email:p.email }));
       renderPresence();
-      if (Number(msg.maxseq||0) > lastSeq) { // catch up if needed (we already fetched state)
+      if (Number(msg.maxseq||0) > lastSeq) { // catch up if needed
         syncSince(lastSeq).then(applySyncResponse).catch(()=>{});
       }
       return;
@@ -233,38 +262,34 @@ function connectLive(){ const url = liveUrl(); if(!url) return; try { ws = new W
 }
 function liveSend(obj){ if (ws && ws.readyState===1) { try { ws.send(JSON.stringify({ ...obj, ws: WORKSPACE_ID })); } catch {} } }
 
-/* ---------------- Awareness (ephemeral) ---------------- */
+/*******************
+ * AWARENESS / DELTA*
+ *******************/
 function sendAware(taskId, start, end){ liveSend({ type:'aware:update', taskId, caretStart:start, caretEnd:end, color: myColor(), name: myName() }); }
 function sendBlurAware(){ liveSend({ type:'aware:blur' }); }
 const sendDelta = debounce((taskId, value)=>{ if (wsConnected && (ws.bufferedAmount||0) < 1_000_000) { liveSend({ type:'delta:content', taskId, field:'content', value, upd: Date.now() }); } }, 60);
 
-function paintAwareness(a){ const el=document.getElementById(a.taskId); if(!el) return; let pill=el.querySelector('.typing-pill'); if(!pill){ pill=document.createElement('div'); pill.className='typing-pill absolute -top-2 left-2 z-10 px-2 py-0.5 rounded-full text-[10px] font-medium text-white hidden'; el.appendChild(pill); }
-  pill.textContent=(a.name||'Someone')+' typing…'; pill.style.background=a.color||'#3b82f6'; pill.classList.remove('hidden'); setTimeout(()=>pill&&pill.classList&&pill.classList.add('hidden'), 800);
-}
-
-/* ---------------- Op-log client ---------------- */
+/*******************
+ * OP-LOG (client) *
+ *******************/
 function nextOpId(){ return `${currentUserKey||'me'}:${++opCounter}`; }
 function enqueueOp(type, payload){ const op={ op_id: nextOpId(), client_id: currentUserKey, base_seq: lastSeq, ts: Date.now(), type, payload }; pendingOps.push(op); applyOpLocal(op, /*fromRemote*/false); flushOpQueue(); }
-
 async function flushOpQueue(){ if (pendingOps.length===0) return; const q = pendingOps.slice(); pendingOps = []; for (const op of q){ sentButUnacked.set(op.op_id, op); if (wsConnected){ liveSend({ type:'op:append', op }); } else { try { const seq = await postOpHTTP(op); // ack via HTTP path
-        sentButUnacked.delete(op.op_id); if (seq > lastSeq) lastSeq = seq; stampSync(); } catch { // push back
+        sentButUnacked.delete(op.op_id); if (seq > lastSeq) lastSeq = seq; stampSync(); } catch { // push back and break (retry later)
         pendingOps.unshift(op); break; } } } }
 
 function applySyncResponse(resp){ if (resp.mode==='snapshot'){ tabData = sanitizeTabs(resp.tabs||{}); lastSeq = Number(resp.base_seq||0); renderTabs(); switchTab(activeTab||Object.keys(tabData)[0]||null); stampSync(); return; } if (resp.mode==='ops'){ for (const it of (resp.ops||[])){ if (it.seq !== lastSeq+1){ // still gap -> fallback to snapshot
         getState().then(s=>{ tabData=sanitizeTabs(s.tabs||{}); lastSeq=Number(s.base_seq||0); renderTabs(); switchTab(activeTab||Object.keys(tabData)[0]||null); }).catch(()=>{}); return; }
-      // apply each op idempotently
       if (!sentButUnacked.has(it.op_id)) applyOpLocal({ op_id:it.op_id, client_id:it.client_id, base_seq:it.base_seq, ts:it.ts, type:it.type, payload:it.payload }, true);
       else sentButUnacked.delete(it.op_id);
       lastSeq = it.seq; }
     stampSync(); }
 }
 
-function sanitizeTabs(tabs){ const out={}; const COLS=['todo','inprogress','done']; Object.keys(tabs||{}).forEach(tab=>{ out[tab]={ todo:[], inprogress:[], done:[] }; COLS.forEach(c=>{ const list=Array.isArray(tabs[tab]?.[c])?tabs[tab][c]:[]; const norm=list.map(t=>normalizeTask(t)); norm.sort((a,b)=>(a.pos||0)-(b.pos||0)); norm.forEach((t,i)=> t.pos=i+1); out[tab][c]=norm; }); }); return out; }
-
+function sanitizeTabs(tabs){ const out={}; Object.keys(tabs||{}).forEach(tab=>{ out[tab]={ todo:[], inprogress:[], done:[] }; COLS.forEach(c=>{ const list=Array.isArray(tabs[tab]?.[c])?tabs[tab][c]:[]; const norm=list.map(t=>normalizeTask(t)); norm.sort((a,b)=>(a.pos||0)-(b.pos||0)); norm.forEach((t,i)=> t.pos=i+1); out[tab][c]=norm; }); }); return out; }
 function normalizeTask(t){ return { id: String(t.id||'').trim() || `task-${cryptoId()}`, content: typeof t.content==='string'?t.content:'', dueDate: (/^\d{4}-\d{2}-\d{2}$/.test(t.dueDate||''))?t.dueDate:'', priority: ['High','Medium','Low'].includes(t.priority)?t.priority:'Medium', pos: Number.isFinite(+t.pos)?+t.pos:0, upd: Number.isFinite(+t.upd)?+t.upd:Date.now(), by: t.by||null }; }
 
-function applyOpLocal(op, fromRemote){ const p=op.payload||{}; const COLS=['todo','inprogress','done'];
-  // Ensure shapes
+function applyOpLocal(op, fromRemote){ const p=op.payload||{};
   function ensureTab(name){ if (!tabData[name]) tabData[name]={ todo:[], inprogress:[], done:[] }; COLS.forEach(c=>{ if(!Array.isArray(tabData[name][c])) tabData[name][c]=[]; }); }
   function reindex(list){ list.forEach((t,i)=> t.pos=i+1); }
 
@@ -289,7 +314,6 @@ function applyOpLocal(op, fromRemote){ const p=op.payload||{}; const COLS=['todo
           else if (field==='dueDate') t.dueDate = normalizeDateString(p.value);
           else if (field==='priority' && ['High','Medium','Low'].includes(p.value)) t.priority = p.value;
           t.upd = op.ts; t.by = op.client_id;
-          // DOM patch
           const el=document.getElementById(id); if (el){ const ed=el.querySelector('.editable'); if (ed && !editingTasks.has(id)) ed.innerText = t.content; const date=el.querySelector('input[type="date"]'); if(date) date.value=t.dueDate; const sel=el.querySelector('select'); if(sel) sel.value=t.priority; }
           return;
         }
@@ -300,7 +324,6 @@ function applyOpLocal(op, fromRemote){ const p=op.payload||{}; const COLS=['todo
 
   if (op.type==='move_task'){
     const id=String(p.task_id||''); const to=COLS.includes(p.to)?p.to:'todo'; const pos=Number.isFinite(+p.pos)?+p.pos:null;
-    // locate
     let foundTab=null, fromCol=null, idx=-1, task=null;
     for (const tb of Object.keys(tabData)){
       for (const c of COLS){ const i=tabData[tb][c].findIndex(x=>x.id===id); if(i!==-1){ foundTab=tb; fromCol=c; idx=i; task=tabData[tb][c][i]; break; } }
@@ -325,25 +348,36 @@ function applyOpLocal(op, fromRemote){ const p=op.payload||{}; const COLS=['todo
   }
 }
 
-/* ---------------- UI (render) ---------------- */
-const COLS=['todo','inprogress','done'];
+/****************
+ * RENDER (UI)  *
+ ****************/
 function renderTabs(){ const node=document.getElementById('tabs'); node.innerHTML=''; const names=Object.keys(tabData); names.forEach(name=>{ const b=document.createElement('button'); b.className='tab-button px-4 py-1.5 rounded-full text-sm font-medium bg-transparent border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:border-indigo-500 hover:text-indigo-600 dark:hover:text-white transition-all duration-150 truncate max-w-[160px]'; if(name===activeTab){ b.classList.add('border-indigo-500','text-indigo-700','dark:text-white','font-semibold','bg-indigo-50','dark:bg-indigo-600/30'); }
   b.dataset.tab=name; b.textContent=name;
   b.onclick=()=>{ switchTab(name); };
   b.ondblclick=()=>{ if(currentRole==='viewer') return; const nn=prompt('Rename tab:',name); if(!nn||!nn.trim()||nn===name||tabData[nn])return; enqueueOp('rename_tab', { from:name, to:nn }); };
-  b.oncontextmenu=(e)=>{ e.preventDefault(); if(currentRole==='viewer')return; if(confirm(`Delete tab "${name}"?`)){ if(activeTab===name) activeTab=Object.keys(tabData).find(t=>t!==name)||null; delete tabData[name]; renderTabs(); renderBoard(); // optional: could add an op type for delete_tab
-  } };
+  b.oncontextmenu=(e)=>{ e.preventDefault(); if(currentRole==='viewer')return; if(confirm(`Delete tab "${name}"?`)){ if(activeTab===name) activeTab=Object.keys(tabData).find(t=>t!==name)||null; delete tabData[name]; renderTabs(); renderBoard(); /* optional: could emit delete_tab op */ }
+  };
   node.appendChild(b); }); }
 
 function switchTab(tab){ if(!tabData[tab]) return; activeTab=tab; document.querySelectorAll('.tab-button').forEach(x=>x.classList.remove('border-indigo-500','text-indigo-700','dark:text-white','font-semibold','bg-indigo-50','dark:bg-indigo-600/30')); const btn=[...document.querySelectorAll('.tab-button')].find(b=>b.dataset.tab===tab); if(btn) btn.classList.add('border-indigo-500','text-indigo-700','dark:text-white','font-semibold','bg-indigo-50','dark:bg-indigo-600/30'); renderBoard(); }
 
 function ensureAtLeastOne(){ const cols=tabData[activeTab]; if(!cols) return; if((cols.todo?.length||0)+(cols.inprogress?.length||0)+(cols.done?.length||0)===0){ const id=`task-${cryptoId()}`; const t={ id, content:'', dueDate:'', priority:'Medium', pos:1, upd:Date.now(), by: currentUserKey }; tabData[activeTab].todo.push(t); renderTaskIntoDOM(activeTab,'todo',t); } }
 
-function renderTaskIntoDOM(tab, column, t){ const colEl=document.getElementById(column); const w=createTaskElement(t.id,t.content,t.dueDate,t.priority,column,t.pos); // insert sorted by pos
-  const siblings=[...colEl.querySelectorAll('[data-task]')]; const where=siblings.find(el=>{ const id=el.id; const tt=findTask(tabData, id); return (tt?.pos||0) > (t.pos||0); }); if(where) colEl.insertBefore(w, where); else colEl.appendChild(w); }
+function renderTaskIntoDOM(tab, column, t){ const colEl=document.getElementById(column); const w=createTaskElement(t.id,t.content,t.dueDate,t.priority,column,t.pos); const siblings=[...colEl.querySelectorAll('[data-task]')]; const where=siblings.find(el=>{ const id=el.id; const tt=findTask(tabData, id); return (tt?.pos||0) > (t.pos||0); }); if(where) colEl.insertBefore(w, where); else colEl.appendChild(w); }
 
 function renderBoard(){ COLS.forEach(col=>{ const colEl=document.getElementById(col); colEl.querySelectorAll('[data-task]')?.forEach(n=>n.remove()); colEl.ondragover=(e)=>{ e.preventDefault(); colEl.classList.add('drag-over','show-drop'); const after=getAfter(colEl, e.clientY); const indicator=colEl.querySelector('.drop-indicator'); if(after==null){ colEl.appendChild(indicator); } else { colEl.insertBefore(indicator, after); } dragContext.overCol = colEl.dataset.col; dragContext.insertIndex = computeInsertIndex(colEl, indicator); }; colEl.ondragleave=()=>{ colEl.classList.remove('drag-over','show-drop'); }; colEl.ondrop=(e)=>{ e.preventDefault(); colEl.classList.remove('drag-over','show-drop'); const id=dragContext.id; if(!id) return; commitReorder(id, dragContext.fromCol, colEl.dataset.col, dragContext.insertIndex); clearDrag(); };
     if(!activeTab || !tabData[activeTab]) return; const data=tabData[activeTab]; (data[col]||[]).sort((a,b)=> (a.pos||0)-(b.pos||0)).forEach(t=> colEl.appendChild(createTaskElement(t.id,t.content,t.dueDate,t.priority,col,t.pos))); }); ensureAtLeastOne(); }
+
+/**********************
+ * TASK NODE CREATION  *
+ **********************/
+const dragContext = { id:null, fromCol:null, overCol:null, insertIndex:null };
+function clearDrag(){ dragContext.id=null; dragContext.fromCol=null; dragContext.overCol=null; dragContext.insertIndex=null; }
+function getAfter(container, y){ const els=[...container.querySelectorAll('[data-task]:not(.dragging)')]; return els.reduce((closest,child)=>{ const box=child.getBoundingClientRect(); const off=y-box.top-box.height/2; if(off<0 && off>closest.offset){ return {offset:off, element:child}; } else return closest; },{offset:-Infinity}).element; }
+function computeInsertIndex(colEl, indicator){ const siblings=[...colEl.querySelectorAll('[data-task]')]; if(siblings.length===0) return 0; const all=[...colEl.children]; let index=0; for(let i=0;i<all.length;i++){ const el=all[i]; if(el===indicator){ index=[...all.slice(0,i)].filter(n=>n.hasAttribute && n.hasAttribute('data-task')).length; return index; } } return siblings.length; }
+function newPosBetween(prev, next){ const A=Number.isFinite(prev)?+prev:0; const B=Number.isFinite(next)?+next:A+2; if(B-A>1e-6) return A+(B-A)/2; return A+0.000001; }
+function reindex(list){ list.forEach((t,i)=> t.pos=i+1); }
+function findTask(data, id){ for (const tab of Object.keys(data||{})){ for (const c of COLS){ const hit=(data[tab][c]||[]).find(x=>x.id===id); if(hit) return hit; } } return null; }
 
 function createTaskElement(id, content='', dueDate='', priority='Medium', column, pos){ const w=document.createElement('div'); w.id=id; w.setAttribute('data-task','1'); w.draggable=currentRole!=='viewer'; w.className='relative p-3 rounded bg-white dark:bg-gray-700 shadow cursor-move mb-2'; w.setAttribute('data-column',column);
   const editable=document.createElement('div'); editable.className='editable w-full font-medium mb-1'; editable.contentEditable=(currentRole!=='viewer'); editable.innerText=content; const placeholder=document.createElement('span'); placeholder.className='absolute left-3 top-3 text-sm text-gray-400 pointer-events-none'; placeholder.textContent='Click to edit...';
@@ -353,213 +387,8 @@ function createTaskElement(id, content='', dueDate='', priority='Medium', column
   const prioritySelect=document.createElement('select'); prioritySelect.disabled=(currentRole==='viewer'); prioritySelect.className='mt-1 ml-2 text-xs bg-transparent text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-gray-600 rounded px-1'; ['High','Medium','Low'].forEach(level=>{ const o=document.createElement('option'); o.value=level; o.text=level; if(level===priority) o.selected=true; prioritySelect.appendChild(o); });
   const del=document.createElement('button'); del.className='absolute top-2 right-2 text-gray-400 hover:text-red-500'; del.innerHTML='<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 18L18 6M6 6l12 12"/></svg>'; del.title='Delete Task'; del.onclick=()=>{ if(currentRole==='viewer')return; if(confirm('Delete this task?')) enqueueOp('delete_task', { task_id:id }); };
 
-  /* ---------------- Manage Members (modal) ---------------- */
-async function fetchRole(){
-  try{
-    const r=await fetch(apiUrl(`workspaces/${encodeURIComponent(WORKSPACE_ID)}/role`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }});
-    if(!r.ok) return currentRole || 'viewer';
-    const j=await r.json().catch(()=>({}));
-    return j.role || 'viewer';
-  }catch{ return currentRole || 'viewer'; }
-}
-async function listShares(){
-  try{
-    const r=await fetch(apiUrl(`shares?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }});
-    if(!r.ok) return [];
-    const j=await r.json().catch(()=>({shares:[]}));
-    return j.shares || [];
-  }catch{ return []; }
-}
-async function invite(email){
-  return fetch(apiUrl('shares'), {
-    method:'POST',
-    headers:{ 'Authorization':`Bearer ${sessionJWT}`, 'Content-Type':'application/json' },
-    body: JSON.stringify({ workspace_id: WORKSPACE_ID, email })
-  });
-}
-async function patchShareRole(id, role){
-  return fetch(apiUrl(`shares/${id}`), {
-    method:'PATCH',
-    headers:{ 'Authorization':`Bearer ${sessionJWT}`, 'Content-Type':'application/json' },
-    body: JSON.stringify({ role })
-  });
-}
-async function removeShare(id){
-  return fetch(apiUrl(`shares/${id}`), {
-    method:'DELETE',
-    headers:{ 'Authorization':`Bearer ${sessionJWT}` }
-  });
-}
-async function transferOwner(toEmail){
-  return fetch(apiUrl(`workspaces/${encodeURIComponent(WORKSPACE_ID)}/transfer_owner`), {
-    method:'POST',
-    headers:{ 'Authorization':`Bearer ${sessionJWT}`, 'Content-Type':'application/json' },
-    body: JSON.stringify({ to_email: toEmail })
-  });
-}
-
-/* ---------- Modal open/close ---------- */
-function openMembers(){
-  const m=document.getElementById('membersModal');
-  if(!m){ console.error('membersModal not found'); return; }
-  m.classList.remove('hidden');
-  document.body.style.overflow = 'hidden';
-  renderMembers();
-}
-function closeMembers(){
-  const m=document.getElementById('membersModal');
-  if(!m) return;
-  m.classList.add('hidden');
-  document.body.style.overflow = '';
-}
-
-/* Close on ESC */
-document.addEventListener('keydown', (e)=>{
-  const m=document.getElementById('membersModal');
-  if(e.key==='Escape' && m && !m.classList.contains('hidden')) closeMembers();
-});
-
-/* ---------- UI render ---------- */
-async function renderMembers(){
-  const list = document.getElementById('membersList');
-  if(!list) return;
-  list.innerHTML = '<div class="py-6 text-sm text-gray-500">Loading…</div>';
-
-  // Ensure the currentRole is up to date
-  try { currentRole = await fetchRole(); } catch {}
-
-  const shares = await listShares();
-  if(!Array.isArray(shares) || shares.length===0){
-    list.innerHTML = '<div class="py-6 text-sm text-gray-500">No members yet. Invite someone above.</div>';
-    return;
-  }
-
-  list.innerHTML = '';
-  shares.forEach(s=>{
-    const row=document.createElement('div');
-    row.className='flex items-center justify-between py-3';
-
-    const who=document.createElement('div');
-    who.className='flex items-center gap-3';
-
-    const bubble=document.createElement('div');
-    bubble.className='h-8 w-8 rounded-full bg-indigo-600/15 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-xs font-semibold';
-    bubble.textContent = initials('', s.email||'');
-
-    const meta=document.createElement('div');
-    const nameLine = `<div class="text-sm font-medium">${s.email||'—'}</div>`;
-    const small = `<div class="text-xs text-gray-500">${s.role||'editor'}</div>`;
-    meta.innerHTML = nameLine + small;
-
-    who.appendChild(bubble);
-    who.appendChild(meta);
-
-    const actions=document.createElement('div');
-    actions.className='flex items-center gap-2';
-
-    // Owner tag is immutable
-    if (String(s.role) === 'owner') {
-      const tag=document.createElement('span');
-      tag.className='text-xs text-gray-500';
-      tag.textContent='owner';
-      actions.appendChild(tag);
-    } else if (currentRole==='owner' && s.id) {
-      // Editable role select for owner
-      const sel=document.createElement('select');
-      sel.className='text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-800';
-      ['editor','viewer','owner'].forEach(r=>{
-        const o=document.createElement('option');
-        o.value=r; o.text=r;
-        if(String(s.role||'editor')===r) o.selected=true;
-        sel.appendChild(o);
-      });
-      sel.onchange = async ()=>{
-        const value = sel.value;
-        if(value==='owner'){
-          if(!confirm(`Transfer ownership to ${s.email}? You will lose owner privileges for this workspace.`)) {
-            sel.value = s.role||'editor';
-            return;
-          }
-          const r=await transferOwner(s.email||'');
-          if(!r.ok){
-            alert('Failed to transfer ownership.');
-            sel.value=s.role||'editor';
-          } else {
-            alert('Ownership transferred. Reloading…');
-            closeMembers();
-            location.reload();
-          }
-          return;
-        }
-        const r=await patchShareRole(s.id, value);
-        if(!r.ok) alert('Failed to update role.');
-        else meta.innerHTML = `<div class="text-sm font-medium">${s.email||'—'}</div><div class="text-xs text-gray-500">${value}</div>`;
-      };
-
-      const del=document.createElement('button');
-      del.className='px-2 py-1 text-xs rounded bg-red-50 text-red-600 hover:bg-red-100';
-      del.textContent='Remove';
-      del.onclick = async ()=>{
-        if(!confirm('Remove this member from the workspace?')) return;
-        const r=await removeShare(s.id);
-        if(r.ok) renderMembers(); else alert('Failed to remove member.');
-      };
-
-      actions.appendChild(sel);
-      actions.appendChild(del);
-    } else {
-      // Non-owner viewers/editors just see a small role tag
-      const tag=document.createElement('span');
-      tag.className='text-xs text-gray-500';
-      tag.textContent=s.role||'editor';
-      actions.appendChild(tag);
-    }
-
-    row.appendChild(who);
-    row.appendChild(actions);
-    list.appendChild(row);
-  });
-}
-
-/* ---------- Invite ---------- */
-const inviteBtn = document.getElementById('inviteBtn');
-if(inviteBtn){
-  inviteBtn.onclick = async ()=>{
-    const input=document.getElementById('inviteEmail');
-    const email=(input?.value||'').trim().toLowerCase();
-    if(!email) return;
-    const r=await invite(email);
-    if(r.ok){
-      input.value='';
-      await renderMembers();
-      alert('Invitation created.');
-    }else{
-      alert('Invite failed.');
-    }
-  };
-}
-const inviteEmailInput = document.getElementById('inviteEmail');
-if(inviteEmailInput){
-  inviteEmailInput.addEventListener('keydown', (e)=>{
-    if(e.key==='Enter') inviteBtn?.click();
-  });
-}
-
-/* ---------- Wire up buttons ---------- */
-const manageBtn = document.getElementById('manageBtn');
-if(manageBtn) manageBtn.onclick = ()=> {
-  if(!WORKSPACE_ID){ alert('Open a workspace first.'); return; }
-  openMembers();
-};
-
-const addUserBtn = document.getElementById('addUserBtn');
-if(addUserBtn) addUserBtn.onclick = ()=> {
-  if(!WORKSPACE_ID){ alert('Open a workspace first.'); return; }
-  openMembers();
-};
-                                                                                     
   // Smooth typing: awareness + deltas + durable debounce
-  editable.addEventListener('focus', ()=>{ isEditing=true; editingTasks.add(id); const sel=window.getSelection(); const pos=sel&&sel.anchorNode?sel.anchorOffset:0; sendAware(id,pos,pos); });
+  editable.addEventListener('focus', ()=>{ isEditing=true; editingTasks.add(id); const sel=window.getSelection(); const pos=(sel&&sel.anchorNode?sel.anchorOffset:0); sendAware(id,pos,pos); });
   editable.addEventListener('keyup', ()=>{ const sel=window.getSelection(); const pos=sel&&sel.anchorNode?sel.anchorOffset:editable.innerText.length; sendAware(id,pos,pos); });
   editable.addEventListener('blur', ()=>{ editingTasks.delete(id); if(editingTasks.size===0){ isEditing=false; if(hasRemoteDuringEdit){ hasRemoteDuringEdit=false; renderTabs(); switchTab(activeTab); stampSync(); } } sendBlurAware(); flushContentDurable(id, editable.innerText.trim()); });
   editable.addEventListener('input', ()=>{ const text=editable.innerText.trim(); sendDelta(id, text); scheduleContentDurable(id, text); toggle(); });
@@ -572,33 +401,80 @@ if(addUserBtn) addUserBtn.onclick = ()=> {
 
   row.appendChild(dateInput); row.appendChild(prioritySelect); w.appendChild(editable); w.appendChild(placeholder); w.appendChild(row); w.appendChild(del); toggle(); return w; }
 
-const dragContext = { id:null, fromCol:null, overCol:null, insertIndex:null };
-function clearDrag(){ dragContext.id=null; dragContext.fromCol=null; dragContext.overCol=null; dragContext.insertIndex=null; }
-function getAfter(container, y){ const els=[...container.querySelectorAll('[data-task]:not(.dragging)')]; return els.reduce((closest,child)=>{ const box=child.getBoundingClientRect(); const off=y-box.top-box.height/2; if(off<0 && off>closest.offset){ return {offset:off, element:child}; } else return closest; },{offset:-Infinity}).element; }
-function computeInsertIndex(colEl, indicator){ const siblings=[...colEl.querySelectorAll('[data-task]')]; if(siblings.length===0) return 0; const all=[...colEl.children]; let index=0; for(let i=0;i<all.length;i++){ const el=all[i]; if(el===indicator){ index=[...all.slice(0,i)].filter(n=>n.hasAttribute && n.hasAttribute('data-task')).length; return index; } } return siblings.length; }
-function newPosBetween(prev, next){ const A=Number.isFinite(prev)?+prev:0; const B=Number.isFinite(next)?+next:A+2; if(B-A>1e-6) return A+(B-A)/2; return A+0.000001; }
-function reindex(list){ list.forEach((t,i)=> t.pos=i+1); }
-
-function commitReorder(taskId, fromCol, toCol, insertIndex){ if(currentRole==='viewer') return; const cols=tabData[activeTab]; let moved; const fromList=cols[fromCol]||[]; const i=fromList.findIndex(t=>t.id===taskId); if(i!==-1){ moved=fromList.splice(i,1)[0]; } if(!moved) return; const target=cols[toCol]=cols[toCol]||[]; if(insertIndex==null||insertIndex<0) insertIndex=target.length; if(insertIndex>target.length) insertIndex=target.length; const prev=target[insertIndex-1]?.pos, next=target[insertIndex]?.pos; const pos=newPosBetween(prev,next); // apply locally
-  moved.pos=pos; target.splice(insertIndex,0,moved); reindex(target); renderBoard(); // durable op
-  enqueueOp('move_task', { task_id: taskId, to: toCol, pos, tab: activeTab }); }
-
-function findTask(data, id){ for (const tab of Object.keys(data||{})){ for (const c of COLS){ const hit=(data[tab][c]||[]).find(x=>x.id===id); if(hit) return hit; } } return null; }
-
-
-/* ---------------- Typing durable debounce ---------------- */
+/*********************
+ * DURABLE CONTENT DB *
+ *********************/
 const contentDebouncers = new Map();
 function scheduleContentDurable(taskId, text){ let fn=contentDebouncers.get(taskId); if(!fn){ fn=debounce((id, val)=> enqueueOp('update_task_field', { task_id:id, field:'content', value: val }), 300); contentDebouncers.set(taskId, fn); } fn(taskId, text); }
 function flushContentDurable(taskId, text){ enqueueOp('update_task_field', { task_id:taskId, field:'content', value:text }); }
 
-/* ---------------- Boot ---------------- */
+/****************
+ * UI WIRING P1 *
+ ****************/
+document.getElementById('presenceBtn').onclick = ()=>{ const t=document.getElementById('presenceTooltip'); t.classList.toggle('hidden'); };
+
+// Reports link + logo href (actual boot attaches ws param)
 function setReportsHref(){ const btn=document.getElementById('reportsLink'); if(btn){ btn.onclick=()=>{ if(!WORKSPACE_ID){ alert('Open a workspace first.'); return; } location.href=`reports.html?ws=${encodeURIComponent(WORKSPACE_ID)}`; }; } const logo=document.getElementById('workspacesLink'); if(logo){ logo.href='workspace.html'; } }
 
-async function boot(){ const ok = await verifySessionAndHydrate(); if(!ok){ location.replace('/sign-in.html'); return; }
-  const url=new URL(location.href); WORKSPACE_ID = url.searchParams.get('ws') || localStorage.getItem('solara_last_ws') || ''; if(!WORKSPACE_ID){ document.getElementById('wsBanner').classList.remove('hidden'); } else { localStorage.setItem('solara_last_ws', WORKSPACE_ID); }
-  // Role + Name
-  try { const r=await fetch(apiUrl(`workspaces/${encodeURIComponent(WORKSPACE_ID)}/role`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}); currentRole = r.ok ? (await r.json()).role || 'viewer' : 'viewer'; } catch { currentRole='viewer'; }
-  // Workspace name
+/****************
+ * MEMBERS / API *
+ ****************/
+async function fetchRole(){ try{ const r=await fetch(apiUrl(`workspaces/${encodeURIComponent(WORKSPACE_ID)}/role`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}); return r.ok ? ((await r.json()).role || 'viewer') : 'viewer'; }catch{ return 'viewer'; } }
+async function listShares(){ try{ const r=await fetch(apiUrl(`shares?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}); if(!r.ok) return []; const j=await r.json().catch(()=>({shares:[]})); return j.shares||[]; }catch{ return []; } }
+async function invite(email){ return fetch(apiUrl('shares'), { method:'POST', headers:{'Authorization':`Bearer ${sessionJWT}`,'Content-Type':'application/json'}, body: JSON.stringify({ workspace_id: WORKSPACE_ID, email }) }); }
+async function patchShareRole(id, role){ return fetch(apiUrl(`shares/${id}`), { method:'PATCH', headers:{'Authorization':`Bearer ${sessionJWT}`,'Content-Type':'application/json'}, body: JSON.stringify({ role }) }); }
+async function removeShare(id){ return fetch(apiUrl(`shares/${id}`), { method:'DELETE', headers:{'Authorization':`Bearer ${sessionJWT}`}}); }
+async function transferOwner(toEmail){ return fetch(apiUrl(`workspaces/${encodeURIComponent(WORKSPACE_ID)}/transfer_owner`), { method:'POST', headers:{'Authorization':`Bearer ${sessionJWT}`,'Content-Type':'application/json'}, body: JSON.stringify({ to_email: toEmail }) }); }
+
+function openMembers(){ document.getElementById('membersModal').classList.remove('hidden'); renderMembers(); }
+function closeMembers(){ document.getElementById('membersModal').classList.add('hidden'); }
+async function renderMembers(){ const list = document.getElementById('membersList'); list.innerHTML = '<div class="py-6 text-sm text-gray-500">Loading…</div>'; const shares = await listShares(); list.innerHTML = ''; shares.forEach(s=>{ const row=document.createElement('div'); row.className='flex items-center justify-between py-3'; const who=document.createElement('div'); who.className='flex items-center gap-3'; const bubble=document.createElement('div'); bubble.className='h-8 w-8 rounded-full bg-indigo-600/15 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-xs font-semibold'; bubble.textContent = (s.email||'?').slice(0,2).toUpperCase(); const meta=document.createElement('div'); meta.innerHTML = `<div class="text-sm font-medium">${s.email||'—'}</div>`; who.appendChild(bubble); who.appendChild(meta); const actions=document.createElement('div'); actions.className='flex items-center gap-2'; if (s.role === 'owner') { const tag=document.createElement('span'); tag.className='text-xs text-gray-500'; tag.textContent='owner'; actions.appendChild(tag); } else if (currentRole==='owner' && s.id) { const sel=document.createElement('select'); sel.className='text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-800'; ['editor','viewer','owner'].forEach(r=>{ const o=document.createElement('option'); o.value=r; o.text=r; if(String(s.role||'editor')===r) o.selected=true; sel.appendChild(o); }); sel.onchange = async ()=>{ if(sel.value==='owner'){ if(!confirm(`Transfer ownership to ${s.email}? You will lose owner privileges.`)) { sel.value = s.role||'editor'; return; } const r=await transferOwner(s.email||''); if(!r.ok){ alert('Failed to transfer'); sel.value=s.role||'editor'; } else { alert('Ownership transferred'); closeMembers(); location.reload(); } return; } const r=await patchShareRole(s.id, sel.value); if(!r.ok) alert('Failed to update role'); };
+      const del=document.createElement('button'); del.className='px-2 py-1 text-xs rounded bg-red-50 text-red-600 hover:bg-red-100'; del.textContent='Remove'; del.onclick = async ()=>{ if(!confirm('Remove this member?')) return; const r=await removeShare(s.id); if(r.ok) renderMembers(); else alert('Failed to remove'); };
+      actions.appendChild(sel); actions.appendChild(del); }
+    row.appendChild(who); row.appendChild(actions); list.appendChild(row); }); }
+
+/****************
+ * UI WIRING P2 *
+ ****************/
+document.getElementById('addTabBtn').onclick = ()=>{ if(currentRole==='viewer') return; const name=prompt('Enter tab name:'); if(!name||!name.trim()) return; const n=name.trim(); if(tabData[n]) return switchTab(n); tabData[n]={ todo:[], inprogress:[], done:[] }; renderTabs(); switchTab(n); };
+document.getElementById('newTaskBtn').onclick = ()=>{ if(currentRole==='viewer') return; const id=`task-${cryptoId()}`; const t={ id, content:'', dueDate:'', priority:'Medium', pos:(tabData[activeTab]?.todo?.slice(-1)[0]?.pos||0)+1, upd:Date.now(), by:currentUserKey }; enqueueOp('create_task', { tab: activeTab, column:'todo', task: t }); };
+document.getElementById('clearBtn').onclick = ()=>{ if(currentRole==='viewer') return; if(!activeTab) return; if(!confirm('Clear all tasks in this tab?')) return; const data=tabData[activeTab]; [...(data?.todo||[]), ...(data?.inprogress||[]), ...(data?.done||[])].forEach(t=> enqueueOp('delete_task', { task_id: t.id })); };
+document.getElementById('exportBtn').onclick = ()=>{ const board=document.getElementById('board'); html2pdf().set({ margin:.5, filename:'Solara-Board.pdf', image:{type:'jpeg',quality:.98}, html2canvas:{scale:2}, jsPDF:{unit:'in', format:'letter', orientation:'landscape'} }).from(board).save(); };
+document.getElementById('userButton').onclick = ()=> document.getElementById('userMenu').classList.toggle('hidden');
+document.getElementById('addUserBtn').onclick = ()=> openMembers();
+document.getElementById('signOutBtn').onclick = async ()=>{ try{ if(sessionJWT){ await fetch(apiUrl('logout'), { method:'POST', headers:{ 'Authorization':`Bearer ${sessionJWT}` } }).catch(()=>{}); } } finally { localStorage.removeItem('stytch_session_jwt'); localStorage.removeItem('solara_session_jwt'); location.replace('/sign-in.html'); } };
+document.getElementById('inviteBtn').onclick = async ()=>{ const input=document.getElementById('inviteEmail'); const email=(input.value||'').trim().toLowerCase(); if(!email) return; const r=await invite(email); if(r.ok){ input.value=''; renderMembers(); alert('Invitation created.'); } else { alert('Invite failed.'); } };
+document.getElementById('manageBtn').onclick = ()=>{ if(!WORKSPACE_ID) return alert('Open a workspace first.'); openMembers(); };
+
+/********************
+ * DRAG COMMIT MOVE *
+ ********************/
+function commitReorder(taskId, fromCol, toCol, insertIndex){ if(currentRole==='viewer') return; const cols=tabData[activeTab]; let moved; const fromList=cols[fromCol]||[]; const i=fromList.findIndex(t=>t.id===taskId); if(i!==-1){ moved=fromList.splice(i,1)[0]; } if(!moved) return; const target=cols[toCol]=cols[toCol]||[]; if(insertIndex==null||insertIndex<0) insertIndex=target.length; if(insertIndex>target.length) insertIndex=target.length; const prev=target[insertIndex-1]?.pos, next=target[insertIndex]?.pos; const pos=newPosBetween(prev,next); // apply locally for instant UX
+  moved.pos=pos; target.splice(insertIndex,0,moved); reindex(target); renderBoard(); // durable op
+  enqueueOp('move_task', { task_id: taskId, to: toCol, pos, tab: activeTab }); }
+
+/****************
+ * PRESENCE UI  *
+ ****************/
+function renderPresence(){ const avatars=document.getElementById('presenceAvatars'); const list=document.getElementById('presenceList'); const count=document.getElementById('presenceCount'); avatars.innerHTML=''; list.innerHTML=''; const others=[...presence.entries()].map(([id,v])=>({id,...v})).sort((a,b)=>(a.name||a.email).localeCompare(b.name||b.email)); count.textContent = others.length ? '' : '0 online'; const max=4; others.slice(0,max).forEach(p=>{ const span=document.createElement('span'); span.className='avatar inline-flex items-center justify-center h-7 w-7 rounded-full bg-indigo-600/10 text-indigo-700 dark:text-indigo-300 text-[11px] font-semibold ring-2 ring-white'; span.title=p.name||p.email; span.textContent=(p.name||p.email||'?').slice(0,2).toUpperCase(); const dot=document.createElement('span'); dot.className='presence-dot'; span.appendChild(dot); avatars.appendChild(span); const row=document.createElement('div'); row.className='flex items-center gap-2'; row.innerHTML=`<div class="relative inline-flex items-center justify-center h-6 w-6 rounded-full bg-indigo-600/10 text-indigo-700 dark:text-indigo-300 text-[10px] font-semibold">${(p.name||p.email||'?').slice(0,2).toUpperCase()}<span class="presence-dot" style="right:-1px;bottom:-1px;width:8px;height:8px"></span></div><div class="truncate">${p.name||p.email}</div>`; list.appendChild(row); }); if(others.length>max){ const extra=others.length-max; const more=document.createElement('span'); more.className='avatar inline-flex items-center justify-center h-7 w-7 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[11px] font-semibold ring-2 ring-white'; more.textContent = `+${extra}`; avatars.appendChild(more); } }
+function paintAwareness(a){ const el=document.getElementById(a.taskId); if(!el) return; let pill=el.querySelector('.typing-pill'); if(!pill){ pill=document.createElement('div'); pill.className='typing-pill absolute -top-2 left-2 z-10 px-2 py-0.5 rounded-full text-[10px] font-medium text-white hidden'; el.appendChild(pill); }
+  pill.textContent=(a.name||'Someone')+' typing…'; pill.style.background=a.color||'#3b82f6'; pill.classList.remove('hidden'); setTimeout(()=>pill&&pill.classList&&pill.classList.add('hidden'), 800);
+}
+
+/****************
+ * BOOTSTRAP    *
+ ****************/
+async function boot(){
+  const ok = await verifySessionAndHydrate();
+  if(!ok){ location.replace('/sign-in.html'); return; }
+
+  const url=new URL(location.href);
+  WORKSPACE_ID = url.searchParams.get('ws') || localStorage.getItem('solara_last_ws') || '';
+  if(!WORKSPACE_ID){ document.getElementById('wsBanner').classList.remove('hidden'); }
+  else { localStorage.setItem('solara_last_ws', WORKSPACE_ID); }
+
+  // Role + Name + Workspace
+  currentRole = await fetchRole();
   try { const wlist = await fetch(apiUrl('workspaces'), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}).then(r=>r.ok?r.json():{workspaces:[]}).catch(()=>({workspaces:[]})); const wsRow=(wlist.workspaces||[]).find(w=>w.id===WORKSPACE_ID); WORKSPACE_NAME = wsRow?.name||''; document.getElementById('wsName').textContent = WORKSPACE_NAME || '—'; if (wsRow && wsRow.owner_id && currentRole !== 'owner' && wsRow.owner_id === currentUserKey) currentRole = 'owner'; } catch{}
 
   // Cold start snapshot
@@ -612,19 +488,22 @@ async function boot(){ const ok = await verifySessionAndHydrate(); if(!ok){ loca
   setInterval(()=>{ fetch(apiUrl('presence/beat'), { method:'POST', headers:{ 'Authorization':`Bearer ${sessionJWT}`, 'Content-Type':'application/json' }, body: JSON.stringify({ workspace_id: WORKSPACE_ID }) }).catch(()=>{}); }, 10000);
   setInterval(async ()=>{ try{ const r=await fetch(apiUrl(`presence?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}); if(!r.ok) return; const j=await r.json(); presence.clear(); (j.online||[]).forEach(p=>{ if(p.id!==currentUserKey) presence.set(p.id, { name:p.name, email:p.email }); }); renderPresence(); }catch{} }, 5000);
 
+  // Sync gap checker (HTTP) when WS is down or if we fall behind
+  setInterval(async ()=>{ try{ const j = await syncSince(lastSeq); applySyncResponse(j); }catch{} }, 2000);
+
+  // Nav helpers
   setReportsHref();
+
+  // Header user menu
+  updateAuthUI();
+
+  // Footer actions wired above
 }
 
-document.getElementById('addTabBtn').onclick = ()=>{ if(currentRole==='viewer') return; const name=prompt('Enter tab name:'); if(!name||!name.trim()) return; const n=name.trim(); if(tabData[n]) return switchTab(n); tabData[n]={ todo:[], inprogress:[], done:[] }; renderTabs(); switchTab(n); };
-document.getElementById('newTaskBtn').onclick = ()=>{ if(currentRole==='viewer') return; const id=`task-${cryptoId()}`; const t={ id, content:'', dueDate:'', priority:'Medium', pos:(tabData[activeTab].todo.slice(-1)[0]?.pos||0)+1, upd:Date.now(), by:currentUserKey }; enqueueOp('create_task', { tab: activeTab, column:'todo', task: t }); };
-document.getElementById('clearBtn').onclick = ()=>{ if(currentRole==='viewer') return; if(!activeTab) return; if(!confirm('Clear all tasks in this tab?')) return; const data=tabData[activeTab]; [...data.todo, ...data.inprogress, ...data.done].forEach(t=> enqueueOp('delete_task', { task_id: t.id })); };
-document.getElementById('exportBtn').onclick = ()=>{ const board=document.getElementById('board'); html2pdf().set({ margin:.5, filename:'Solara-Board.pdf', image:{type:'jpeg',quality:.98}, html2canvas:{scale:2}, jsPDF:{unit:'in', format:'letter', orientation:'landscape'} }).from(board).save(); };
-
-document.getElementById('userButton').onclick = ()=> document.getElementById('userMenu').classList.toggle('hidden');
-document.getElementById('addUserBtn').onclick = ()=> alert('Open the members panel from the footer gear icon in this build.');
-document.getElementById('signOutBtn').onclick = async ()=>{ try{ if(sessionJWT){ await fetch(apiUrl('logout'), { method:'POST', headers:{ 'Authorization':`Bearer ${sessionJWT}` } }).catch(()=>{}); } } finally { localStorage.removeItem('stytch_session_jwt'); localStorage.removeItem('solara_session_jwt'); location.replace('/sign-in.html'); } };
-
 document.addEventListener('DOMContentLoaded', boot);
+  
 </script>
+
+
 </body>
 </html>
