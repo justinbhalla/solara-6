@@ -1,4 +1,3 @@
-<!-- Solara v11 — dual canvases + op-log compatible -->
 <!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
@@ -82,81 +81,50 @@
     </button>
   </div>
   <div class="flex items-center gap-3">
-    <!-- Left canvas actions -->
-    <div class="flex items-center gap-2">
-      <button id="clearBtnA" title="Clear all tasks (left tab)" class="p-2 rounded-full bg-red-100 text-red-600 hover:bg-red-200 transition-all">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m0 0A2.99 2.99 0 017 6h10a2.99 2.99 0 012.418 3H19v10a2 2 0 01-2 2H7a2 2 0 01-2-2V9h.582zM10 11v6m4-6v6"/></svg>
-      </button>
-      <button id="newTaskBtnA" class="px-3 py-1.5 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-500 shadow transition">+ Left</button>
-    </div>
-    <!-- Right canvas actions -->
-    <div class="flex items-center gap-2">
-      <button id="clearBtnB" title="Clear all tasks (right tab)" class="p-2 rounded-full bg-red-100 text-red-600 hover:bg-red-200 transition-all">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m0 0A2.99 2.99 0 017 6h10a2.99 2.99 0 012.418 3H19v10a2 2 0 01-2 2H7a2 2 0 01-2-2V9h.582zM10 11v6m4-6v6"/></svg>
-      </button>
-      <button id="newTaskBtnB" class="px-3 py-1.5 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-500 shadow transition">+ Right</button>
-    </div>
-
-    <button id="exportBtn" class="ml-1 p-2 rounded-full hover:bg-indigo-100 text-indigo-600 transition" title="Download Both Canvases">
-      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 16l4-5h-3V4h-2v7H8l4 5zm-7 4h14v-2H5v2z"/></svg>
+    <button id="clearBtn" title="Clear all tasks in current tab" class="p-2 rounded-full bg-red-100 text-red-600 hover:bg-red-200 transition-all">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m0 0A2.99 2.99 0 017 6h10a2.99 2.99 0 012.418 3H19v10a2 2 0 01-2 2H7a2 2 0 01-2-2V9h.582zM10 11v6m4-6v6"/></svg>
     </button>
+    <button id="newTaskBtn" class="px-4 py-1.5 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-500 shadow transition">+</button>
   </div>
 </nav>
 
-<!-- Dual canvases -->
+<!-- Board (single canvas) -->
 <main class="p-6 flex-1 overflow-y-auto">
-  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-    <!-- Canvas A -->
-    <section class="flex flex-col bg-white/40 dark:bg-gray-800/40 rounded-lg border border-gray-200 dark:border-gray-700">
-      <div class="flex items-center justify-between p-3 border-b border-gray-200 dark:border-gray-700">
-        <div class="flex items-center gap-2">
-          <span class="text-sm text-gray-500">Left canvas</span>
-          <select id="tabSelectA" class="text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-800"></select>
-        </div>
-        <div class="flex items-center gap-2">
-          <button id="renameTabBtnA" class="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700">Rename</button>
-          <button id="deleteTabBtnA" class="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700">Delete</button>
-          <button id="addTabBtn" class="text-xs px-2 py-1 rounded bg-green-100 hover:bg-green-200 text-green-700 border border-green-200">+ Tab</button>
-        </div>
-      </div>
-      <div id="boardA" class="p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div id="todoA" class="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg shadow-sm" data-col="todo"><h2 class="text-lg font-semibold mb-2">To Do</h2><div class="drop-indicator"></div></div>
-        <div id="inprogressA" class="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg shadow-sm" data-col="inprogress"><h2 class="text-lg font-semibold mb-2">In Progress</h2><div class="drop-indicator"></div></div>
-        <div id="doneA" class="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg shadow-sm" data-col="done"><h2 class="text-lg font-semibold mb-2">Done</h2><div class="drop-indicator"></div></div>
-      </div>
-    </section>
+  <div class="flex items-center justify-between mb-3">
+    <div class="flex items-center gap-2">
+      <label class="text-sm text-gray-500">Tab</label>
+      <select id="tabSelect" class="text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-800"></select>
+    </div>
+    <div class="flex items-center gap-2">
+      <button id="renameTabBtn" class="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700">Rename</button>
+      <button id="deleteTabBtn" class="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700">Delete</button>
+      <button id="addTabBtn" class="text-xs px-2 py-1 rounded bg-green-100 hover:bg-green-200 text-green-700 border border-green-200">+ Tab</button>
+    </div>
+  </div>
 
-    <!-- Canvas B -->
-    <section class="flex flex-col bg-white/40 dark:bg-gray-800/40 rounded-lg border border-gray-200 dark:border-gray-700">
-      <div class="flex items-center justify-between p-3 border-b border-gray-200 dark:border-gray-700">
-        <div class="flex items-center gap-2">
-          <span class="text-sm text-gray-500">Right canvas</span>
-          <select id="tabSelectB" class="text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-800"></select>
-        </div>
-        <div class="flex items-center gap-2">
-          <button id="renameTabBtnB" class="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700">Rename</button>
-          <button id="deleteTabBtnB" class="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700">Delete</button>
-        </div>
-      </div>
-      <div id="boardB" class="p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div id="todoB" class="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg shadow-sm" data-col="todo"><h2 class="text-lg font-semibold mb-2">To Do</h2><div class="drop-indicator"></div></div>
-        <div id="inprogressB" class="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg shadow-sm" data-col="inprogress"><h2 class="text-lg font-semibold mb-2">In Progress</h2><div class="drop-indicator"></div></div>
-        <div id="doneB" class="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg shadow-sm" data-col="done"><h2 class="text-lg font-semibold mb-2">Done</h2><div class="drop-indicator"></div></div>
-      </div>
-    </section>
+  <div id="board" class="grid grid-cols-1 md:grid-cols-3 gap-6">
+    <div id="todo" class="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg shadow-sm" data-col="todo">
+      <h2 class="text-lg font-semibold mb-2">To Do</h2><div class="drop-indicator"></div>
+    </div>
+    <div id="inprogress" class="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg shadow-sm" data-col="inprogress">
+      <h2 class="text-lg font-semibold mb-2">In Progress</h2><div class="drop-indicator"></div>
+    </div>
+    <div id="done" class="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg shadow-sm" data-col="done">
+      <h2 class="text-lg font-semibold mb-2">Done</h2><div class="drop-indicator"></div>
+    </div>
   </div>
 </main>
 
 <!-- Footer -->
 <div class="sticky bottom-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 z-50">
-  <footer class="grid grid-cols-3 items-center text-center text-xs text-gray-500 dark:text-gray-400 px-6 py-3">
+  <footer class="grid grid-cols-3 items-center text-center text-xs text-gray-500 dark:text-gray-400 px-6 py-3 border-t border-gray-200 dark:border-gray-700">
     <div class="slot text-left truncate">Workspace: <span id="wsName">—</span></div>
     <div class="slot">© 2025 ZenLock Group (ZLG). All rights reserved.</div>
     <div class="slot text-right truncate"><span id="lastSynced">Last synced: —</span></div>
   </footer>
 </div>
 
-<!-- Members Modal (unchanged behavior) -->
+<!-- Members Modal -->
 <div id="membersModal" class="hidden fixed inset-0 z-[60] flex items-center justify-center">
   <div class="absolute inset-0 bg-black/40" onclick="closeMembers()"></div>
   <div class="relative w-full max-w-lg rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-5 shadow-xl">
@@ -188,13 +156,14 @@ let currentUserKey = null;
 let currentRole = 'viewer';
 
 const COLS = ['todo','inprogress','done'];
-let tabData = {};                // { tabName: {todo:[], inprogress:[], done:[]} }
+let tabData = {};
+let activeTab = null;
+
 let ws = null;
 let wsConnected = false;
-let lastSeq = 0;                 // from /state.base_seq and incremented via ops
-let syncing = false;
+let lastSeq = 0;
 
-let presence = new Map(); // others only
+let presence = new Map();
 let lastSyncedAt = null;
 
 let presenceBeatTimer = null;
@@ -205,10 +174,6 @@ let isEditing = false;
 let isDragging = false;
 let editingTasks = new Set();
 let hasRemoteDuringEdit = false;
-
-// dual canvases
-let activeTabA = null;
-let activeTabB = null;
 
 /* ---------------- UTIL ---------------- */
 const debounce = (fn, ms=400)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; };
@@ -221,12 +186,10 @@ function normalizeDateString(v){ if(!v) return ''; if(/^\d{4}-\d{2}-\d{2}$/.test
 function stampSync(){ lastSyncedAt = new Date(); document.getElementById('lastSynced').textContent = 'Last synced: ' + lastSyncedAt.toLocaleTimeString(); }
 function uuid(){ try { return crypto.randomUUID(); } catch { return Math.random().toString(36).slice(2); } }
 
-/* A single place for fetch — always send credentials + Bearer */
 async function apiFetch(path, opts={}){
   const headers = Object.assign({'Content-Type':'application/json'}, opts.headers||{});
   if (sessionJWT) headers['Authorization'] = `Bearer ${sessionJWT}`;
-  const res = await fetch(apiUrl(path), { credentials:'include', ...opts, headers });
-  return res;
+  return fetch(apiUrl(path), { credentials:'include', ...opts, headers });
 }
 
 /* ---------------- AUTH ---------------- */
@@ -263,13 +226,12 @@ async function patchShareRole(id, role){ return apiFetch(`shares/${id}`, { metho
 async function removeShare(id){ return apiFetch(`shares/${id}`, { method:'DELETE' }); }
 async function transferOwner(toEmail){ return apiFetch(`workspaces/${encodeURIComponent(WORKSPACE_ID)}/transfer_owner`, { method:'POST', body: JSON.stringify({ to_email: toEmail }) }); }
 
-/* ---------------- V11 SNAPSHOT & OP-LOG ---------------- */
-async function fetchState(){ const r=await apiFetch(`state?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`); if(!r.ok) throw new Error('state_failed'); const j=await r.json(); return j; }
+/* ---------------- SNAPSHOT & OP-LOG (v11) ---------------- */
+async function fetchState(){ const r=await apiFetch(`state?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`); if(!r.ok) throw new Error('state_failed'); return r.json(); }
 async function syncSince(since){
-  if(syncing) return; syncing=true;
   try{
     const r = await apiFetch(`sync?workspace_id=${encodeURIComponent(WORKSPACE_ID)}&since=${since}`);
-    if(!r.ok){ syncing=false; return; }
+    if(!r.ok) return;
     const data = await r.json();
     if(data.mode==='snapshot'){
       tabData = sanitizeTabs(data.tabs||{});
@@ -285,10 +247,10 @@ async function syncSince(since){
         stampSync();
       }
     }
-  }catch{} finally{ syncing=false; }
+  }catch{}
 }
 function sanitizeTabs(tabs){
-  const out = {}; COLS.forEach(()=>{});
+  const out = {};
   Object.keys(tabs||{}).forEach(tab=>{
     out[tab] = { todo:[], inprogress:[], done:[] };
     COLS.forEach(c=>{
@@ -311,18 +273,18 @@ function normalizeTaskJS(t){
     by: t.by||null
   };
 }
-function applyOpsInOrder(ops){
-  for(const op of ops){ tabData = applyOpToTabs(tabData, op); }
+function applyOpsInOrder(ops){ for(const op of ops){ tabData = applyOpToTabs(tabData, op); } }
+function ensureTabShape(obj, tab){
+  if (!obj[tab]) obj[tab] = { todo:[], inprogress:[], done:[] };
+  COLS.forEach(c=>{ if(!Array.isArray(obj[tab][c])) obj[tab][c]=[]; });
 }
+function reindex(list){ list.forEach((t,i)=> t.pos=i+1); }
 function applyOpToTabs(currTabs, op){
   const tabs = JSON.parse(JSON.stringify(currTabs||{}));
-  const p = op.payload||{}; const cols = COLS;
-  function ensureTabShape(tab){ if(!tabs[tab]) tabs[tab]={todo:[],inprogress[],done:[]}; if(!tabs[tab].inprogress) tabs[tab].inprogress=[]; if(!tabs[tab].done) tabs[tab].done=[]; if(!tabs[tab].todo) tabs[tab].todo=[]; }
-  function reindex(list){ list.forEach((t,i)=> t.pos=i+1); }
-
+  const p = op.payload||{};
   if(op.type==='create_task'){
-    const tab = (p.tab||'Default')+''; ensureTabShape(tab);
-    const col = cols.includes(p.column)?p.column:'todo';
+    const tab = String(p.tab||'Default'); ensureTabShape(tabs, tab);
+    const col = COLS.includes(p.column)?p.column:'todo';
     const task = normalizeTaskJS(p.task||{});
     const list = tabs[tab][col];
     if(Number.isFinite(+task.pos)){ let idx=list.findIndex(x=>x.pos>task.pos); if(idx<0) idx=list.length; list.splice(idx,0,task); reindex(list); }
@@ -331,13 +293,13 @@ function applyOpToTabs(currTabs, op){
   }
   if(op.type==='update_task_field'){
     const id = String(p.task_id||''); const field = String(p.field||''); const val = p.value;
-    for (const tb of Object.keys(tabs)){ for(const c of cols){ const t=tabs[tb][c].find(x=>x.id===id); if(t){ if(field==='content') t.content=String(val||''); else if(field==='dueDate') t.dueDate=(/^\d{4}-\d{2}-\d{2}$/.test(val||''))?val:''; else if(field==='priority' && ['High','Medium','Low'].includes(val)) t.priority=val; t.upd=Number(op.ts||Date.now()); t.by=op.client_id; return tabs; } } }
+    for (const tb of Object.keys(tabs)){ for(const c of COLS){ const t=tabs[tb][c].find(x=>x.id===id); if(t){ if(field==='content') t.content=String(val||''); else if(field==='dueDate') t.dueDate=(/^\d{4}-\d{2}-\d{2}$/.test(val||''))?val:''; else if(field==='priority' && ['High','Medium','Low'].includes(val)) t.priority=val; t.upd=Number(op.ts||Date.now()); t.by=op.client_id; return tabs; } } }
     return tabs;
   }
   if(op.type==='move_task'){
-    const id=String(p.task_id||''); const to = cols.includes(p.to)?p.to:'todo';
+    const id=String(p.task_id||''); const to = COLS.includes(p.to)?p.to:'todo';
     let foundTab=null, fromCol=null, idx=-1, task=null;
-    for(const tb of Object.keys(tabs)){ for(const c of cols){ const i=tabs[tb][c].findIndex(x=>x.id===id); if(i!==-1){ foundTab=tb; fromCol=c; idx=i; task=tabs[tb][c][i]; break; } } if(task) break; }
+    for(const tb of Object.keys(tabs)){ for(const c of COLS){ const i=tabs[tb][c].findIndex(x=>x.id===id); if(i!==-1){ foundTab=tb; fromCol=c; idx=i; task=tabs[tb][c][i]; break; } } if(task) break; }
     if(!task) return tabs;
     tabs[foundTab][fromCol].splice(idx,1); reindex(tabs[foundTab][fromCol]);
     const list = tabs[foundTab][to]; const pos=Number.isFinite(+p.pos)?+p.pos:null;
@@ -347,7 +309,7 @@ function applyOpToTabs(currTabs, op){
   }
   if(op.type==='delete_task'){
     const id=String(p.task_id||'');
-    for(const tb of Object.keys(tabs)){ for(const c of cols){ const i=tabs[tb][c].findIndex(x=>x.id===id); if(i!==-1){ tabs[tb][c].splice(i,1); reindex(tabs[tb][c]); return tabs; } } }
+    for(const tb of Object.keys(tabs)){ for(const c of COLS){ const i=tabs[tb][c].findIndex(x=>x.id===id); if(i!==-1){ tabs[tb][c].splice(i,1); reindex(tabs[tb][c]); return tabs; } } }
     return tabs;
   }
   if(op.type==='rename_tab'){
@@ -360,21 +322,17 @@ function applyOpToTabs(currTabs, op){
 }
 function newPosBetween(prev, next){ const A=Number.isFinite(prev)?+prev:0; const B=Number.isFinite(next)?+next:A+2; if (B-A>1e-6) return A+(B-A)/2; return A+0.000001; }
 
-/* Send op via WS if possible; else HTTP /ops */
 async function sendOp(type, payload){
   const op = { type, op_id: uuid(), client_id: currentUserKey||'unknown', base_seq: lastSeq||0, ts: Date.now(), payload: payload||{} };
-  // optimistic apply for snappy UX
+  // optimistic apply
   tabData = applyOpToTabs(tabData, { ...op, seq: lastSeq+1 });
-  renderAll();
+  renderBoard();
 
   if (wsConnected) { try{ ws.send(JSON.stringify({ type:'op:append', ws: WORKSPACE_ID, op })); return; }catch{} }
-  try{
-    const r = await apiFetch('ops',{ method:'POST', body: JSON.stringify({ workspace_id: WORKSPACE_ID, op }) });
-    if(!r.ok) console.warn('op append failed');
-  }catch(e){ console.warn('op append error', e); }
+  try{ await apiFetch('ops',{ method:'POST', body: JSON.stringify({ workspace_id: WORKSPACE_ID, op }) }); }catch{}
 }
 
-/* ---------------- PRESENCE HTTP ---------------- */
+/* ---------------- PRESENCE (HTTP fallback) ---------------- */
 async function presenceBeatHTTP(){ try{ await apiFetch('presence/beat', { method:'POST', body: JSON.stringify({ workspace_id: WORKSPACE_ID }) }); }catch{} }
 async function presencePollHTTP(){
   try{
@@ -400,7 +358,6 @@ function connectLive(){
   ws.onmessage = async (ev)=>{
     let msg = {}; try{ msg=JSON.parse(ev.data||'{}'); }catch{}
     if(msg.type==='hello' && msg.ws===WORKSPACE_ID){
-      // v11 hello: { maxseq, online, you }
       currentUserKey = msg.you?.user_id || currentUserKey;
       presence.clear(); (msg.online||[]).forEach(p=> presence.set(p.id, { name:p.name, email:p.email })); renderPresence();
       if (Number(msg.maxseq||0) > lastSeq) { await syncSince(lastSeq); }
@@ -411,7 +368,7 @@ function connectLive(){
       if (seq !== lastSeq + 1) { await syncSince(lastSeq); return; }
       tabData = applyOpToTabs(tabData, msg.op||{});
       lastSeq = seq;
-      if (!isEditing && !isDragging) { renderAll(); stampSync(); } else { hasRemoteDuringEdit = true; }
+      if (!isEditing && !isDragging) { renderBoard(); stampSync(); } else { hasRemoteDuringEdit = true; }
       return;
     }
     if(msg.type==='presence/join'){ if(msg.by && msg.by!==currentUserKey){ presence.set(msg.by, { name:msg.name||'', email:msg.email||'' }); renderPresence(); } return; }
@@ -419,16 +376,14 @@ function connectLive(){
   };
 }
 
-/* ---------------- PRESENCE UI ---------------- */
+/* ---------------- UI ---------------- */
 function renderPresence(){
   const avatars=document.getElementById('presenceAvatars');
   const list=document.getElementById('presenceList');
   const count=document.getElementById('presenceCount');
   avatars.innerHTML=''; list.innerHTML='';
-
   const others = [...presence.entries()].map(([id,v])=>({id,...v})).sort((a,b)=>(a.name||a.email).localeCompare(b.name||b.email));
   count.textContent = others.length ? '' : '0 online';
-
   const max=4;
   others.slice(0,max).forEach(p=>{
     const span=document.createElement('span');
@@ -436,7 +391,6 @@ function renderPresence(){
     span.title=p.name||p.email; span.textContent=initials(p.name,p.email);
     const dot=document.createElement('span'); dot.className='presence-dot'; span.appendChild(dot);
     avatars.appendChild(span);
-
     const row=document.createElement('div');
     row.className='flex items-center gap-2';
     row.innerHTML=`<div class="relative inline-flex items-center justify-center h-6 w-6 rounded-full bg-indigo-600/10 text-indigo-700 dark:text-indigo-300 text-[10px] font-semibold">
@@ -451,32 +405,20 @@ function renderPresence(){
     more.textContent = `+${extra}`; avatars.appendChild(more);
   }
 }
-document.getElementById('presenceBtn').onclick = ()=>{
-  const t=document.getElementById('presenceTooltip');
-  t.classList.toggle('hidden');
-};
 
-/* ---------------- RENDERING (dual canvases) ---------------- */
-function renderTabSelectors(){
+function renderTabSelector(){
   const names = Object.keys(tabData);
-  const selA = document.getElementById('tabSelectA');
-  const selB = document.getElementById('tabSelectB');
-  function fill(sel, active){
-    const cur = sel.value;
-    sel.innerHTML = '';
-    names.forEach(n=>{ const o=document.createElement('option'); o.value=n; o.text=n; sel.appendChild(o); });
-    sel.value = names.includes(active)?active:(names[0]||'');
-  }
-  fill(selA, activeTabA); fill(selB, activeTabB);
-  activeTabA = selA.value; activeTabB = selB.value;
+  const sel = document.getElementById('tabSelect');
+  const cur = sel.value;
+  sel.innerHTML = '';
+  names.forEach(n=>{ const o=document.createElement('option'); o.value=n; o.text=n; sel.appendChild(o); });
+  sel.value = names.includes(activeTab)?activeTab:(names[0]||'');
+  activeTab = sel.value;
 }
-function renderAll(){
-  renderTabSelectors();
-  renderBoard('A'); renderBoard('B');
-}
-function ensureAtLeastOne(tab){ const cols=tabData[tab]; if(!cols) return; if((cols.todo?.length||0)+(cols.inprogress?.length||0)+(cols.done?.length||0)===0){ /* keep empty */ } }
 
-function createTaskElement(id, content='', dueDate='', priority='Medium', column, pane){
+function ensureAtLeastOne(){ const cols=tabData[activeTab]; if(!cols) return; /* no auto-insert */ }
+
+function createTaskElement(id, content='', dueDate='', priority='Medium', column){
   const w=document.createElement('div');
   w.id=id; w.setAttribute('data-task','1'); w.draggable=currentRole!=='viewer';
   w.className='relative p-3 rounded bg-white dark:bg-gray-700 shadow cursor-move mb-2'; w.setAttribute('data-column',column);
@@ -491,29 +433,28 @@ function createTaskElement(id, content='', dueDate='', priority='Medium', column
   ['High','Medium','Low'].forEach(level=>{ const o=document.createElement('option'); o.value=level; o.text=level; if(level===priority) o.selected=true; prioritySelect.appendChild(o); });
   const del=document.createElement('button'); del.className='absolute top-2 right-2 text-gray-400 hover:text-red-500'; del.innerHTML='<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>'; del.title='Delete Task'; del.onclick=()=>{ if(currentRole==='viewer')return; if(confirm('Delete this task?')) sendOp('delete_task',{ task_id:id }); };
 
-  // Smooth typing flags
   editable.addEventListener('focus', ()=>{ isEditing=true; editingTasks.add(id); });
-  editable.addEventListener('blur', ()=>{ editingTasks.delete(id); if(editingTasks.size===0){ isEditing=false; if(hasRemoteDuringEdit){ hasRemoteDuringEdit=false; renderAll(); stampSync(); } } });
+  editable.addEventListener('blur', ()=>{ editingTasks.delete(id); if(editingTasks.size===0){ isEditing=false; if(hasRemoteDuringEdit){ hasRemoteDuringEdit=false; renderBoard(); stampSync(); } } });
   editable.addEventListener('input', ()=>{ toggle(); sendOp('update_task_field',{ task_id:id, field:'content', value: editable.innerText.trim() }); });
 
   dateInput.addEventListener('focus', ()=>{ isEditing=true; editingTasks.add(id); });
-  dateInput.addEventListener('blur', ()=>{ editingTasks.delete(id); if(editingTasks.size===0){ isEditing=false; if(hasRemoteDuringEdit){ hasRemoteDuringEdit=false; renderAll(); stampSync(); } } });
+  dateInput.addEventListener('blur', ()=>{ editingTasks.delete(id); if(editingTasks.size===0){ isEditing=false; if(hasRemoteDuringEdit){ hasRemoteDuringEdit=false; renderBoard(); stampSync(); } } });
   dateInput.addEventListener('change', ()=> sendOp('update_task_field',{ task_id:id, field:'dueDate', value: normalizeDateString(dateInput.value) }));
 
   prioritySelect.addEventListener('focus', ()=>{ isEditing=true; editingTasks.add(id); });
-  prioritySelect.addEventListener('blur', ()=>{ editingTasks.delete(id); if(editingTasks.size===0){ isEditing=false; if(hasRemoteDuringEdit){ hasRemoteDuringEdit=false; renderAll(); stampSync(); } } });
+  prioritySelect.addEventListener('blur', ()=>{ editingTasks.delete(id); if(editingTasks.size===0){ isEditing=false; if(hasRemoteDuringEdit){ hasRemoteDuringEdit=false; renderBoard(); stampSync(); } } });
   prioritySelect.addEventListener('change', ()=> sendOp('update_task_field',{ task_id:id, field:'priority', value: prioritySelect.value||'Medium' }));
 
-  w.addEventListener('dragstart',e=>{ if(currentRole==='viewer'){ e.preventDefault(); return; } isDragging=true; w.classList.add('dragging'); e.dataTransfer.setData('text/plain',id); dragContext.id=id; dragContext.fromCol=w.getAttribute('data-column'); dragContext.pane=pane; });
-  w.addEventListener('dragend',()=>{ isDragging=false; w.classList.remove('dragging'); if(hasRemoteDuringEdit){ hasRemoteDuringEdit=false; renderAll(); stampSync(); } });
+  w.addEventListener('dragstart',e=>{ if(currentRole==='viewer'){ e.preventDefault(); return; } isDragging=true; w.classList.add('dragging'); e.dataTransfer.setData('text/plain',id); dragContext.id=id; dragContext.fromCol=w.getAttribute('data-column'); });
+  w.addEventListener('dragend',()=>{ isDragging=false; w.classList.remove('dragging'); if(hasRemoteDuringEdit){ hasRemoteDuringEdit=false; renderBoard(); stampSync(); } });
 
   row.appendChild(dateInput); row.appendChild(prioritySelect);
   w.appendChild(editable); w.appendChild(placeholder); w.appendChild(row); w.appendChild(del);
   toggle();
   return w;
 }
-const dragContext = { id:null, fromCol:null, overCol:null, insertIndex:null, pane:null };
-function clearDrag(){ dragContext.id=null; dragContext.fromCol=null; dragContext.overCol=null; dragContext.insertIndex=null; dragContext.pane=null; }
+const dragContext = { id:null, fromCol:null, overCol:null, insertIndex:null };
+function clearDrag(){ dragContext.id=null; dragContext.fromCol=null; dragContext.overCol=null; dragContext.insertIndex=null; }
 function getAfter(container, y){
   const els=[...container.querySelectorAll('[data-task]:not(.dragging)')];
   return els.reduce((closest,child)=>{ const box=child.getBoundingClientRect(); const off=y-box.top-box.height/2; if(off<0 && off>closest.offset){ return {offset:off, element:child}; } else return closest; },{offset:-Infinity}).element;
@@ -525,14 +466,12 @@ function computeInsertIndex(colEl, indicator){
   for(let i=0;i<all.length;i++){ const el=all[i]; if(el===indicator){ index=[...all.slice(0,i)].filter(n=>n.hasAttribute && n.hasAttribute('data-task')).length; return index; } }
   return siblings.length;
 }
-function renderBoard(pane){
-  const active = pane==='A' ? activeTabA : activeTabB;
-  if(!active || !tabData[active]) return;
-  ensureAtLeastOne(active);
-
-  const root = document.getElementById(pane==='A'?'boardA':'boardB');
+function renderBoard(){
+  renderTabSelector();
+  if(!activeTab || !tabData[activeTab]) return;
+  ensureAtLeastOne();
   ['todo','inprogress','done'].forEach(col=>{
-    const colEl = document.getElementById(col + pane);
+    const colEl=document.getElementById(col);
     colEl.querySelectorAll('[data-task]')?.forEach(n=>n.remove());
 
     colEl.ondragover = (e)=>{
@@ -549,22 +488,19 @@ function renderBoard(pane){
       e.preventDefault();
       colEl.classList.remove('drag-over','show-drop');
       const id=dragContext.id; if(!id) return;
-      const list = tabData[active][dragContext.overCol]||[];
+      const list = tabData[activeTab][dragContext.overCol]||[];
       const prev = list[dragContext.insertIndex-1]?.pos;
       const next = list[dragContext.insertIndex]?.pos;
       const pos = newPosBetween(prev, next);
       sendOp('move_task', { task_id:id, to: colEl.dataset.col, pos });
       clearDrag();
     };
-  });
 
-  ['todo','inprogress','done'].forEach(col=>{
-    const colEl = document.getElementById(col + pane);
-    (tabData[active][col]||[]).sort((a,b)=> (a.pos||0)-(b.pos||0)).forEach(t=> colEl.appendChild(createTaskElement(t.id,t.content,t.dueDate,t.priority,col,pane)));
+    (tabData[activeTab][col]||[]).sort((a,b)=> (a.pos||0)-(b.pos||0)).forEach(t=> colEl.appendChild(createTaskElement(t.id,t.content,t.dueDate,t.priority,col)));
   });
 }
 
-/* ---------------- Members UI ---------------- */
+/* ---------------- Members Modal ---------------- */
 function openMembers(){ document.getElementById('membersModal').classList.remove('hidden'); renderMembers(); }
 function closeMembers(){ document.getElementById('membersModal').classList.add('hidden'); }
 async function renderMembers(){
@@ -605,7 +541,7 @@ async function renderMembers(){
   });
 }
 
-/* ---------------- Boot / fallback orchestration ---------------- */
+/* ---------------- Boot / Fallback orchestration ---------------- */
 function setReportsHref(){
   const btn=document.getElementById('reportsLink');
   if(btn){ btn.onclick=()=>{ if(!WORKSPACE_ID){ alert('Open a workspace first.'); return; } location.href=`reports.html?ws=${encodeURIComponent(WORKSPACE_ID)}`; }; }
@@ -615,17 +551,13 @@ function stopSyncPolling(){ if(syncPollTimer){ clearInterval(syncPollTimer); syn
 function startHTTPFallback(){
   if(!presenceBeatTimer){ presenceBeatHTTP(); presenceBeatTimer = setInterval(presenceBeatHTTP, 10000); }
   if(!presencePollTimer){ presencePollHTTP(); presencePollTimer = setInterval(presencePollHTTP, 5000); }
-  if(!syncPollTimer){
-    syncPollTimer = setInterval(async ()=>{ if(isEditing||isDragging) return; await syncSince(lastSeq); }, 1500);
-  }
+  if(!syncPollTimer){ syncPollTimer = setInterval(async ()=>{ if(isEditing||isDragging) return; await syncSince(lastSeq); }, 1500); }
 }
 
 async function chooseWorkspaceId(){
   const url=new URL(location.href);
   let wid = url.searchParams.get('ws') || localStorage.getItem('solara_last_ws') || '';
   if (wid) return wid;
-
-  // if none, pick first or create one
   const r = await apiFetch('workspaces'); const j = r.ok? await r.json(): { workspaces:[] };
   const first = (j.workspaces||[])[0];
   if (first) wid = first.id;
@@ -649,7 +581,6 @@ async function boot(){
   WORKSPACE_ID = await chooseWorkspaceId();
   if(!WORKSPACE_ID){ document.getElementById('wsBanner').classList.remove('hidden'); return; }
 
-  // Role + Name
   currentRole = await fetchRole();
   const wlist = await apiFetch('workspaces').then(r=>r.ok?r.json():{workspaces:[]}).catch(()=>({workspaces:[]}));
   const wsRow = (wlist.workspaces||[]).find(w=>w.id===WORKSPACE_ID);
@@ -657,20 +588,17 @@ async function boot(){
   document.getElementById('wsName').textContent = WORKSPACE_NAME || '—';
   if (wsRow && wsRow.owner_id && currentRole !== 'owner' && wsRow.owner_id === currentUserKey) currentRole = 'owner';
 
-  // Snapshot bootstrap
   try{
     const state = await fetchState();
     tabData = sanitizeTabs(state.tabs||{});
     lastSeq = Number(state.base_seq||0);
   }catch{
-    tabData = {};
-    lastSeq = 0;
+    tabData = {}; lastSeq = 0;
   }
   if(Object.keys(tabData).length===0){ tabData['Click to edit']={ todo:[], inprogress:[], done:[] }; }
-  activeTabA = Object.keys(tabData)[0]; activeTabB = Object.keys(tabData)[0];
-  renderAll();
+  activeTab = Object.keys(tabData)[0];
+  renderBoard();
 
-  // HTTP fallback + Live
   startHTTPFallback();
   connectLive();
 
@@ -682,66 +610,36 @@ document.getElementById('addTabBtn').onclick = ()=>{
   if(currentRole==='viewer') return;
   const name=prompt('Enter tab name:'); if(!name||!name.trim()) return; const n=name.trim();
   if(tabData[n]) return alert('Tab already exists.');
-  // create by renaming empty temp
   tabData[n] = { todo:[], inprogress:[], done:[] };
-  renderAll();
+  renderBoard();
 };
-
-function renameFlow(which){
-  const cur = which==='A'?activeTabA:activeTabB;
-  const nn = prompt('Rename tab:', cur);
+document.getElementById('renameTabBtn').onclick = ()=>{
+  const cur = activeTab; const nn = prompt('Rename tab:', cur);
   if(!nn||!nn.trim()||nn===cur||tabData[nn]) return;
   sendOp('rename_tab', { from: cur, to: nn });
-}
-function deleteFlow(which){
-  const cur = which==='A'?activeTabA:activeTabB;
-  if(!confirm(`Delete tab "${cur}"?`)) return;
-  // delete by moving through delete_task ops (simple approach)
+};
+document.getElementById('deleteTabBtn').onclick = ()=>{
+  const cur = activeTab; if(!confirm(`Delete tab "${cur}"?`)) return;
   const lists = COLS.flatMap(c=> (tabData[cur]?.[c]||[]));
   lists.forEach(t=> sendOp('delete_task', { task_id: t.id }));
-  // also rename to a unique temp then drop locally (for immediate UX)
-  delete tabData[cur];
-  const names = Object.keys(tabData); activeTabA = names[0]||null; activeTabB = names[0]||null;
-  renderAll();
-}
+  delete tabData[cur]; activeTab = Object.keys(tabData)[0]||null; renderBoard();
+};
+document.getElementById('tabSelect').onchange = (e)=>{ activeTab = e.target.value; renderBoard(); };
 
-document.getElementById('renameTabBtnA').onclick = ()=> renameFlow('A');
-document.getElementById('renameTabBtnB').onclick = ()=> renameFlow('B');
-document.getElementById('deleteTabBtnA').onclick = ()=> deleteFlow('A');
-document.getElementById('deleteTabBtnB').onclick = ()=> deleteFlow('B');
-
-document.getElementById('tabSelectA').onchange = (e)=>{ activeTabA = e.target.value; renderBoard('A'); };
-document.getElementById('tabSelectB').onchange = (e)=>{ activeTabB = e.target.value; renderBoard('B'); };
-
-function addNewTask(which){
+document.getElementById('newTaskBtn').onclick = ()=>{
   if(currentRole==='viewer') return;
-  const tab = which==='A'?activeTabA:activeTabB; if(!tab) return;
-  const list = tabData[tab]?.todo||[]; const pos=(list[list.length-1]?.pos||0)+1;
+  if(!activeTab){ tabData['Click to edit']={ todo:[], inprogress:[], done:[] }; activeTab='Click to edit'; }
+  const list = tabData[activeTab]?.todo||[]; const pos=(list[list.length-1]?.pos||0)+1;
   const id = `task-${uuid()}`;
-  sendOp('create_task', { tab, column:'todo', task:{ id, content:'', dueDate:'', priority:'Medium', pos }});
-  // focus will occur on next render (optional: delay + query)
+  sendOp('create_task', { tab: activeTab, column:'todo', task:{ id, content:'', dueDate:'', priority:'Medium', pos }});
   setTimeout(()=>{ document.getElementById(id)?.querySelector('.editable')?.focus(); }, 50);
-}
-document.getElementById('newTaskBtnA').onclick = ()=> addNewTask('A');
-document.getElementById('newTaskBtnB').onclick = ()=> addNewTask('B');
-
-async function clearAll(which){
+};
+document.getElementById('clearBtn').onclick = ()=>{
   if(currentRole==='viewer') return;
-  const tab = which==='A'?activeTabA:activeTabB; if(!tab) return;
-  if(!confirm(`Clear all tasks in "${tab}"?`)) return;
-  const lists = COLS.flatMap(c=> (tabData[tab]?.[c]||[]));
-  for(const t of lists){ await sendOp('delete_task', { task_id: t.id }); }
-}
-document.getElementById('clearBtnA').onclick = ()=> clearAll('A');
-document.getElementById('clearBtnB').onclick = ()=> clearAll('B');
-
-document.getElementById('exportBtn').onclick = ()=>{
-  const wrapper=document.createElement('div');
-  wrapper.innerHTML='';
-  const cloneA = document.getElementById('boardA').cloneNode(true);
-  const cloneB = document.getElementById('boardB').cloneNode(true);
-  wrapper.appendChild(cloneA); wrapper.appendChild(document.createElement('hr')); wrapper.appendChild(cloneB);
-  html2pdf().set({ margin:.5, filename:'Solara-Boards.pdf', image:{type:'jpeg',quality:.98}, html2canvas:{scale:2}, jsPDF:{unit:'in', format:'letter', orientation:'landscape'} }).from(wrapper).save();
+  if(!activeTab) return;
+  if(!confirm('Clear all tasks in this tab?')) return;
+  const lists = COLS.flatMap(c=> (tabData[activeTab]?.[c]||[]));
+  lists.forEach(t=> sendOp('delete_task', { task_id: t.id }));
 };
 
 document.getElementById('userButton').onclick = ()=> document.getElementById('userMenu').classList.toggle('hidden');
@@ -756,7 +654,6 @@ document.getElementById('inviteBtn').onclick = async ()=>{
   const r=await invite(email); if(r.ok){ input.value=''; renderMembers(); alert('Invitation created.'); } else { alert('Invite failed.'); }
 };
 
-/* kick it */
 document.addEventListener('DOMContentLoaded', boot);
 </script>
 </body>
