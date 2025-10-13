@@ -1,4 +1,4 @@
-<!-- Solara v10.2 — Split Part 1 of 2 (paste into solara.html) -->
+<!-- Solara v10.2 — Split Part 1 of 2 (UI + Core Logic; add Part 2 <script> before </body>) -->
 <!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
@@ -17,7 +17,7 @@
     .date-badge{ font-variant-numeric: tabular-nums }
     .presence-dot{ position:absolute; right:-2px; bottom:-2px; width:10px; height:10px; border-radius:999px; background:#10b981; border:2px solid white }
     .avatar{ position:relative }
-    footer .slot{ min-width: 0 }
+    footer .slot{ min-width:0 }
   </style>
 </head>
 <body class="flex flex-col min-h-screen bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">
@@ -110,7 +110,7 @@
     <div class="flex items-center gap-2 w-full overflow-x-auto px-1 py-1">
       <div id="tabs" class="flex gap-2 min-w-max"></div>
       <button id="addTabBtn" title="Add Tab" class="p-2 rounded-full bg-green-100 hover:bg-green-200 text-green-700 transition duration-150 shadow-sm border border-green-200">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 4v16m8-8H4"/></svg>
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
       </button>
     </div>
     <div class="flex items-center gap-1">
@@ -129,7 +129,7 @@
   </footer>
 </div>
 
-<!-- Members Modal (unchanged behavior) -->
+<!-- Members Modal -->
 <div id="membersModal" class="hidden fixed inset-0 z-[60] flex items-center justify-center">
   <div class="absolute inset-0 bg-black/40" onclick="closeMembers()"></div>
   <div class="relative w-full max-w-lg rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-5 shadow-xl">
@@ -148,11 +148,11 @@
 </div>
 
 <script>
-/* ---------------- CONFIG ---------------- */
+/*********************** CONFIG ************************/
 const API_BASE = "https://shy-smoke-ab8e.justinbhalla28.workers.dev";
-const apiUrl = p => API_BASE.replace(/\/+$/,'') + '/' + String(p||'').replace(/^\/+/,'' );
+const apiUrl = p => API_BASE.replace(/\/+$/,'') + '/' + String(p||'').replace(/^\/+/,'');
 
-/* ---------------- STATE ---------------- */
+/*********************** STATE *************************/
 let WORKSPACE_ID = '';
 let WORKSPACE_NAME = '';
 let sessionJWT = null;
@@ -179,7 +179,7 @@ let isDragging = false;
 let editingTasks = new Set();
 let hasRemoteDuringEdit = false;
 
-/* ---------------- UTIL ---------------- */
+/*********************** UTIL **************************/
 const debounce = (fn, ms=400)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; };
 function getSessionJWT(){
   const m = document.cookie.match(/(?:^|; )(?:stytch_session_jwt|solara_session_jwt)=([^;]+)/);
@@ -189,7 +189,7 @@ function initials(name,email){ const parts=(name||'').trim().split(/\s+/).filter
 function normalizeDateString(v){ if(!v) return ''; if(/^\d{4}-\d{2}-\d{2}$/.test(v)) return v; const d=new Date(v); if(isNaN(d)) return ''; const tz=d.getTimezoneOffset()*60000; return new Date(d.getTime()-tz).toISOString().slice(0,10); }
 function stampSync(){ lastSyncedAt = new Date(); document.getElementById('lastSynced').textContent = 'Last synced: ' + lastSyncedAt.toLocaleTimeString(); }
 
-/* ---------------- AUTH ---------------- */
+/*********************** AUTH ***************************/
 function displayNameFor(u){ const f=u?.name?.first_name, l=u?.name?.last_name, e=u?.email_addresses?.[0]?.email_address; return [f,l].filter(Boolean).join(' ') || e || 'User'; }
 function updateAuthUI(){
   const name=displayNameFor(authedUser);
@@ -214,7 +214,7 @@ async function verifySessionAndHydrate(){
   }catch{ return false; }
 }
 
-/* ---------------- MEMBERS / SHARES ---------------- */
+/**************** MEMBERS / SHARES **********************/
 async function fetchRole(){ const r=await fetch(apiUrl(`workspaces/${encodeURIComponent(WORKSPACE_ID)}/role`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}); if(!r.ok) return 'viewer'; const j=await r.json().catch(()=>({})); return j.role||'viewer'; }
 async function listShares(){ const r=await fetch(apiUrl(`shares?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}); if(!r.ok) return []; const j=await r.json().catch(()=>({shares:[]})); return j.shares||[]; }
 async function invite(email){ return fetch(apiUrl('shares'), { method:'POST', headers:{'Authorization':`Bearer ${sessionJWT}`,'Content-Type':'application/json'}, body: JSON.stringify({ workspace_id: WORKSPACE_ID, email }) }); }
@@ -222,11 +222,11 @@ async function patchShareRole(id, role){ return fetch(apiUrl(`shares/${id}`), { 
 async function removeShare(id){ return fetch(apiUrl(`shares/${id}`), { method:'DELETE', headers:{'Authorization':`Bearer ${sessionJWT}`}}); }
 async function transferOwner(toEmail){ return fetch(apiUrl(`workspaces/${encodeURIComponent(WORKSPACE_ID)}/transfer_owner`), { method:'POST', headers:{'Authorization':`Bearer ${sessionJWT}`,'Content-Type':'application/json'}, body: JSON.stringify({ to_email: toEmail }) }); }
 
-/* ---------------- TABS LOAD/SAVE ---------------- */
+/**************** TABS LOAD/SAVE ************************/
 async function fetchTabs(){ const r=await fetch(apiUrl(`tasks?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}); if(!r.ok) return {}; const j=await r.json().catch(()=>({tabs:{}})); return j.tabs||{}; }
 async function saveTabsHTTP(tabs){ await fetch(apiUrl('tasks'), { method:'POST', headers:{'Authorization':`Bearer ${sessionJWT}`,'Content-Type':'application/json'}, body: JSON.stringify({ workspace_id: WORKSPACE_ID, tabs }) }); }
 
-/* ---------------- PRESENCE HTTP ---------------- */
+/**************** PRESENCE HTTP *************************/
 async function presenceBeatHTTP(){ try{ await fetch(apiUrl('presence/beat'), { method:'POST', headers:{ 'Authorization':`Bearer ${sessionJWT}`,'Content-Type':'application/json' }, body: JSON.stringify({ workspace_id: WORKSPACE_ID }) }); }catch{} }
 async function presencePollHTTP(){
   try{
@@ -240,7 +240,7 @@ async function presencePollHTTP(){
   }catch{}
 }
 
-/* ---------------- LIVE WS ---------------- */
+/**************** LIVE WS ********************************/
 function liveUrl(){ try{ const u=new URL(API_BASE); u.pathname=(u.pathname.replace(/\/+$/,'')+'/live').replace(/\/{2,}/g,'/'); u.search=`?ws=${encodeURIComponent(WORKSPACE_ID)}&token=${encodeURIComponent(sessionJWT)}`; u.protocol=u.protocol.replace('http','ws'); return u.toString(); }catch{ return null; } }
 function connectLive(){
   const url = liveUrl(); if(!url) { startHTTPFallback(); return; }
@@ -259,7 +259,6 @@ function connectLive(){
       renderTabs(); switchTab(activeTab); stampSync(); return;
     }
     if(msg.type==='tabs:set' && msg.ws===WORKSPACE_ID){
-      // Ignore self echo unless our local state diverged (rare)
       const fromSelf = !!msg.by && msg.by === currentUserKey;
       const changed = mergeRemoteTabs(msg.tabs||{}, msg.by);
       if (!isEditing && !isDragging && (!fromSelf || changed)) {
@@ -276,7 +275,7 @@ function connectLive(){
 }
 function liveSend(obj){ if(ws && ws.readyState===1){ try{ ws.send(JSON.stringify({ ...obj, ws: WORKSPACE_ID })); }catch{} } }
 
-/* ---------------- PRESENCE UI ---------------- */
+/**************** PRESENCE UI ****************************/
 function renderPresence(){
   const avatars=document.getElementById('presenceAvatars');
   const list=document.getElementById('presenceList');
@@ -308,23 +307,20 @@ function renderPresence(){
     more.textContent = `+${extra}`; avatars.appendChild(more);
   }
 }
+
 document.getElementById('presenceBtn').onclick = ()=>{
   const t=document.getElementById('presenceTooltip');
   t.classList.toggle('hidden');
 };
 
-/* ---------------- MERGE (preserve edits) ---------------- */
+/**************** MERGE (preserve edits) *****************/
 function mergeRemoteTabs(remote, by){
-  // returns true if structure differs from current tabData
   const prevJSON = JSON.stringify(tabData);
-  // Deep clone to avoid reference surprises
   const local = tabData;
   const editingIds = new Set(editingTasks);
 
-  // Replace baseline with remote
   tabData = JSON.parse(JSON.stringify(remote||{}));
 
-  // If we're editing, restore local versions of those tasks by id (content, dueDate, priority, pos)
   if (editingIds.size){
     for (const tabName of Object.keys(tabData)) {
       for (const col of COLS) {
@@ -332,7 +328,6 @@ function mergeRemoteTabs(remote, by){
         for (let i=0;i<list.length;i++){
           const t = list[i];
           if (editingIds.has(t.id)){
-            // find local copy
             const lt = findTask(local, t.id);
             if (lt){
               list[i] = { ...t, content: lt.content, dueDate: lt.dueDate, priority: lt.priority, pos: lt.pos, upd: lt.upd, by: lt.by };
@@ -355,7 +350,7 @@ function findTask(data, id){
   return null;
 }
 
-/* ---------------- SHAPE / RENDER ---------------- */
+/**************** SHAPE / RENDER *************************/
 function migrateShapes(data){
   const out=JSON.parse(JSON.stringify(data||{}));
   Object.keys(out).forEach(tab=>{
@@ -480,12 +475,7 @@ function renderBoard(){
   });
 }
 
-// ================== STOP HERE FOR PART 1 ==================
-// Paste the entire Part 2 <script> block right before </body>
-<!-- Solara v10.2 — Split Part 2 of 2 -->
-<!-- Copy this entire <script> block and paste it just before </body> in Part 1 (solara.html). Do not duplicate <html> or <body> tags. -->
-<script>
-/* ---------------- Mutations -> Live push ---------------- */
+/************ Mutations -> Live push ********************/
 function persistTaskEdits(taskId, patch){
   if(!activeTab || !tabData[activeTab]) return;
   const cols=COLS;
@@ -522,7 +512,6 @@ function addNewTask(){
   const id=`task-${cryptoRandom()}`; const now=Date.now();
   const t={ id, content:'', dueDate:'', priority:'Medium', pos:(tabData[activeTab].todo.slice(-1)[0]?.pos||0)+1, upd:now, by:currentUserKey };
   tabData[activeTab].todo.push(t); renderBoard(); pushTabs();
-  // focus the new task for immediate typing
   const el = document.getElementById(id)?.querySelector('.editable'); if (el){ el.focus(); }
 }
 function commitReorder(taskId, fromCol, toCol, insertIndex){
@@ -546,7 +535,7 @@ const pushTabs = debounce(()=> {
   stampSync();
 }, 250);
 
-/* ---------------- Members UI ---------------- */
+/**************** Members UI ****************************/
 function openMembers(){ document.getElementById('membersModal').classList.remove('hidden'); renderMembers(); }
 function closeMembers(){ document.getElementById('membersModal').classList.add('hidden'); }
 async function renderMembers(){
@@ -587,7 +576,35 @@ async function renderMembers(){
   });
 }
 
-/* ---------------- Boot / fallback orchestration ---------------- */
+/**************** Helpers used by Part 2 ****************/
+function setReportsHref(){
+  const btn=document.getElementById('reportsLink');
+  if(btn){ btn.onclick=()=>{ if(!WORKSPACE_ID){ alert('Open a workspace first.'); return; } location.href=`reports.html?ws=${encodeURIComponent(WORKSPACE_ID)}`; }; }
+  const logo=document.getElementById('workspacesLink'); if(logo){ logo.href='workspace.html'; }
+}
+function stopTaskPolling(){ if(taskPollTimer){ clearInterval(taskPollTimer); taskPollTimer=null; } }
+function startHTTPFallback(){
+  if(!presenceBeatTimer){ presenceBeatHTTP(); presenceBeatTimer = setInterval(presenceBeatHTTP, 10000); }
+  if(!presencePollTimer){ presencePollHTTP(); presencePollTimer = setInterval(presencePollHTTP, 5000); }
+  if(!taskPollTimer){
+    taskPollTimer = setInterval(async ()=>{
+      try{
+        const serverTabs = migrateShapes(await fetchTabs());
+        if (isEditing || isDragging){
+          const changed = mergeRemoteTabs(serverTabs);
+          if (changed) hasRemoteDuringEdit = true;
+          return;
+        }
+        const changed = mergeRemoteTabs(serverTabs);
+        if (changed){
+          if(!tabData[activeTab]) activeTab = Object.keys(tabData)[0]||activeTab;
+          renderTabs(); switchTab(activeTab); stampSync();
+        }
+      }catch{}
+    }, 2000);
+  }
+}
+/**************** DOM EVENTS & ACTIONS *******************/
 document.getElementById('addTabBtn').onclick = ()=>{ if(currentRole==='viewer') return; const name=prompt('Enter tab name:'); if(!name||!name.trim()) return; const n=name.trim(); if(tabData[n]) return switchTab(n); tabData[n]={ todo:[], inprogress:[], done:[] }; renderTabs(); switchTab(n); pushTabs(); };
 document.getElementById('newTaskBtn').onclick = addNewTask;
 document.getElementById('clearBtn').onclick = clearAllTasks;
@@ -606,38 +623,43 @@ document.getElementById('inviteBtn').onclick = async ()=>{
   const r=await invite(email); if(r.ok){ input.value=''; renderMembers(); alert('Invitation created.'); } else { alert('Invite failed.'); }
 };
 
-function setReportsHref(){
-  const btn=document.getElementById('reportsLink');
-  if(btn){ btn.onclick=()=>{ if(!WORKSPACE_ID){ alert('Open a workspace first.'); return; } location.href=`reports.html?ws=${encodeURIComponent(WORKSPACE_ID)}`; }; }
-  const logo=document.getElementById('workspacesLink'); if(logo){ logo.href='workspace.html'; }
-}
-function stopTaskPolling(){ if(taskPollTimer){ clearInterval(taskPollTimer); taskPollTimer=null; } }
-function startHTTPFallback(){
-  if(!presenceBeatTimer){ presenceBeatHTTP(); presenceBeatTimer = setInterval(presenceBeatHTTP, 10000); }
-  if(!presencePollTimer){ presencePollHTTP(); presencePollTimer = setInterval(presencePollHTTP, 5000); }
-  if(!taskPollTimer){
-    taskPollTimer = setInterval(async ()=>{
-      try{
-        const serverTabs = migrateShapes(await fetchTabs());
-        if (isEditing || isDragging){
-          // merge silently, render later
-          const changed = mergeRemoteTabs(serverTabs);
-          if (changed) hasRemoteDuringEdit = true;
-          return;
-        }
-        const changed = mergeRemoteTabs(serverTabs);
-        if (changed){
-          if(!tabData[activeTab]) activeTab = Object.keys(tabData)[0]||activeTab;
-          renderTabs(); switchTab(activeTab); stampSync();
-        }
-      }catch{}
-    }, 2000);
-  }
+/**************** Workspace Name Resolver ***************/
+async function resolveWorkspaceName(id){
+  if(!id) return '';
+  try {
+    const cache = JSON.parse(localStorage.getItem('solara_ws_names')||'{}');
+    if (cache[id]) return cache[id];
+  } catch {}
+  // Try list endpoint first
+  try {
+    const list = await fetch(apiUrl('workspaces'), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}).then(r=>r.ok?r.json():{workspaces:[]}).catch(()=>({workspaces:[]}));
+    const row = (list.workspaces||[]).find(w=>w.id===id);
+    if(row && row.name){
+      const cache = JSON.parse(localStorage.getItem('solara_ws_names')||'{}');
+      cache[id] = row.name; localStorage.setItem('solara_ws_names', JSON.stringify(cache));
+      return row.name;
+    }
+  } catch {}
+  // Fallback to single workspace endpoint if available
+  try {
+    const r = await fetch(apiUrl(`workspaces/${encodeURIComponent(id)}`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }});
+    if (r.ok){ const j = await r.json().catch(()=>({})); if(j && j.name){
+      const cache = JSON.parse(localStorage.getItem('solara_ws_names')||'{}'); cache[id]=j.name; localStorage.setItem('solara_ws_names', JSON.stringify(cache));
+      return j.name;
+    } }
+  } catch {}
+  return '';
 }
 
+/******************** BOOT ******************************/
 async function boot(){
   const ok = await verifySessionAndHydrate();
-  if(!ok){ location.replace('/sign-in.html'); return; }
+  if(!ok){
+    // Prevent sign-in redirect loop if already on sign-in.html
+    const onSignIn = /(^|\/)sign-in\.html$/i.test(location.pathname);
+    if(!onSignIn) { location.replace('/sign-in.html'); }
+    return;
+  }
 
   const url=new URL(location.href);
   WORKSPACE_ID = url.searchParams.get('ws') || localStorage.getItem('solara_last_ws') || '';
@@ -651,7 +673,9 @@ async function boot(){
   currentRole = await fetchRole();
   const wlist = await fetch(apiUrl('workspaces'), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}).then(r=>r.ok?r.json():{workspaces:[]}).catch(()=>({workspaces:[]}));
   const wsRow = (wlist.workspaces||[]).find(w=>w.id===WORKSPACE_ID);
-  WORKSPACE_NAME = wsRow?.name || '';
+
+  // Resolve & display name (with resilient fallbacks)
+  WORKSPACE_NAME = wsRow?.name || await resolveWorkspaceName(WORKSPACE_ID) || '';
   document.getElementById('wsName').textContent = WORKSPACE_NAME || '—';
   if (wsRow && wsRow.owner_id && currentRole !== 'owner' && wsRow.owner_id === currentUserKey) currentRole = 'owner';
 
@@ -665,10 +689,13 @@ async function boot(){
   startHTTPFallback();
   connectLive();
 }
+
 document.addEventListener('DOMContentLoaded', boot);
 </script>
-<!-- ==== END OF PART 2 ==== -->
+</body>
+</html>
 
-<!-- END Part 1 -->
+
+<!-- Part 2 goes here -->
 </body>
 </html>
