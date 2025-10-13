@@ -1,3 +1,4 @@
+<!-- Solara v10.2 — smooth sync (retain all UI/UX/features from your last file) -->
 <!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
@@ -88,20 +89,8 @@
   </div>
 </nav>
 
-<!-- Board (single canvas) -->
+<!-- Board -->
 <main class="p-6 flex-1 overflow-y-auto">
-  <div class="flex items-center justify-between mb-3">
-    <div class="flex items-center gap-2">
-      <label class="text-sm text-gray-500">Tab</label>
-      <select id="tabSelect" class="text-sm border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-800"></select>
-    </div>
-    <div class="flex items-center gap-2">
-      <button id="renameTabBtn" class="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700">Rename</button>
-      <button id="deleteTabBtn" class="text-xs px-2 py-1 rounded border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700">Delete</button>
-      <button id="addTabBtn" class="text-xs px-2 py-1 rounded bg-green-100 hover:bg-green-200 text-green-700 border border-green-200">+ Tab</button>
-    </div>
-  </div>
-
   <div id="board" class="grid grid-cols-1 md:grid-cols-3 gap-6">
     <div id="todo" class="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg shadow-sm" data-col="todo">
       <h2 class="text-lg font-semibold mb-2">To Do</h2><div class="drop-indicator"></div>
@@ -117,6 +106,22 @@
 
 <!-- Footer -->
 <div class="sticky bottom-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 z-50">
+  <div class="flex items-center justify-between px-6 py-3 overflow-x-auto">
+    <div class="flex items-center gap-2 w-full overflow-x-auto px-1 py-1">
+      <div id="tabs" class="flex gap-2 min-w-max"></div>
+      <button id="addTabBtn" title="Add Tab" class="p-2 rounded-full bg-green-100 hover:bg-green-200 text-green-700 transition duration-150 shadow-sm border border-green-200">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+      </button>
+    </div>
+    <div class="flex items-center gap-1">
+      <button id="manageBtn" class="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 transition" title="Manage members">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.57-.906 3.435.96 2.53 2.53a1.724 1.724 0 001.065 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.906 1.57-.96 3.435-2.53 2.53a1.724 1.724 0 00-2.573 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.57.906-3.435-.96-2.53-2.53A1.724 1.724 0 003.087 13.9c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.906-1.57.96-3.435 2.53-2.53.98.565 2.229.11 2.642-1.13zM12 9a3 3 0 110 6 3 3 0 010-6z"/></svg>
+      </button>
+      <button id="exportBtn" class="ml-1 p-2 rounded-full hover:bg-indigo-100 text-indigo-600 transition" title="Download Board">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 16l4-5h-3V4h-2v7H8l4 5zm-7 4h14v-2H5v2z"/></svg>
+      </button>
+    </div>
+  </div>
   <footer class="grid grid-cols-3 items-center text-center text-xs text-gray-500 dark:text-gray-400 px-6 py-3 border-t border-gray-200 dark:border-gray-700">
     <div class="slot text-left truncate">Workspace: <span id="wsName">—</span></div>
     <div class="slot">© 2025 ZenLock Group (ZLG). All rights reserved.</div>
@@ -124,7 +129,7 @@
   </footer>
 </div>
 
-<!-- Members Modal -->
+<!-- Members Modal (unchanged behavior) -->
 <div id="membersModal" class="hidden fixed inset-0 z-[60] flex items-center justify-center">
   <div class="absolute inset-0 bg-black/40" onclick="closeMembers()"></div>
   <div class="relative w-full max-w-lg rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-5 shadow-xl">
@@ -141,35 +146,42 @@
     <div id="membersList" class="divide-y divide-gray-200 dark:divide-gray-700"></div>
   </div>
 </div>
-
 <script>
 /* ---------------- CONFIG ---------------- */
-const API_BASE = "https://shy-smoke-ab8e.justinbhalla28.workers.dev";
+const API_BASE = "https://withered-disk-2405.justinbhalla28.workers.dev";
 const apiUrl = p => API_BASE.replace(/\/+$/,'') + '/' + String(p||'').replace(/^\/+/,'');
 
 /* ---------------- STATE ---------------- */
+let MODE = 'auto'; // 'v11' | 'v10' (auto-detected)
 let WORKSPACE_ID = '';
 let WORKSPACE_NAME = '';
+
 let sessionJWT = null;
 let authedUser = null;
 let currentUserKey = null;
 let currentRole = 'viewer';
 
 const COLS = ['todo','inprogress','done'];
-let tabData = {};
 let activeTab = null;
+let tabData = {};
 
 let ws = null;
 let wsConnected = false;
-let lastSeq = 0;
 
 let presence = new Map();
 let lastSyncedAt = null;
 
+// v10 polling
+let taskPollTimer = null;
+// v11 polling
+let syncPollTimer = null;
+let lastSeq = 0;
+
+// presence (both modes)
 let presenceBeatTimer = null;
 let presencePollTimer = null;
-let syncPollTimer = null;
 
+// Smooth-sync flags
 let isEditing = false;
 let isDragging = false;
 let editingTasks = new Set();
@@ -186,12 +198,6 @@ function normalizeDateString(v){ if(!v) return ''; if(/^\d{4}-\d{2}-\d{2}$/.test
 function stampSync(){ lastSyncedAt = new Date(); document.getElementById('lastSynced').textContent = 'Last synced: ' + lastSyncedAt.toLocaleTimeString(); }
 function uuid(){ try { return crypto.randomUUID(); } catch { return Math.random().toString(36).slice(2); } }
 
-async function apiFetch(path, opts={}){
-  const headers = Object.assign({'Content-Type':'application/json'}, opts.headers||{});
-  if (sessionJWT) headers['Authorization'] = `Bearer ${sessionJWT}`;
-  return fetch(apiUrl(path), { credentials:'include', ...opts, headers });
-}
-
 /* ---------------- AUTH ---------------- */
 function displayNameFor(u){ const f=u?.name?.first_name, l=u?.name?.last_name, e=u?.email_addresses?.[0]?.email_address; return [f,l].filter(Boolean).join(' ') || e || 'User'; }
 function updateAuthUI(){
@@ -200,6 +206,11 @@ function updateAuthUI(){
   document.getElementById('avatar').textContent = initials(name,email);
   document.getElementById('userName').textContent = name;
   document.getElementById('userEmail').textContent = email;
+}
+async function apiFetch(path, opts={}) {
+  const headers = Object.assign({'Content-Type':'application/json'}, opts.headers||{});
+  if (sessionJWT) headers['Authorization'] = `Bearer ${sessionJWT}`;
+  return fetch(apiUrl(path), { credentials:'include', ...opts, headers });
 }
 async function verifySessionAndHydrate(){
   sessionJWT = getSessionJWT();
@@ -218,7 +229,7 @@ async function verifySessionAndHydrate(){
   }catch{ return false; }
 }
 
-/* ---------------- MEMBERS / SHARES ---------------- */
+/* ---------------- MEMBERS / SHARES (both modes, endpoints unchanged) ---------------- */
 async function fetchRole(){ const r=await apiFetch(`workspaces/${encodeURIComponent(WORKSPACE_ID)}/role`); if(!r.ok) return 'viewer'; const j=await r.json().catch(()=>({})); return j.role||'viewer'; }
 async function listShares(){ const r=await apiFetch(`shares?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`); if(!r.ok) return []; const j=await r.json().catch(()=>({shares:[]})); return j.shares||[]; }
 async function invite(email){ return apiFetch('shares', { method:'POST', body: JSON.stringify({ workspace_id: WORKSPACE_ID, email }) }); }
@@ -226,43 +237,49 @@ async function patchShareRole(id, role){ return apiFetch(`shares/${id}`, { metho
 async function removeShare(id){ return apiFetch(`shares/${id}`, { method:'DELETE' }); }
 async function transferOwner(toEmail){ return apiFetch(`workspaces/${encodeURIComponent(WORKSPACE_ID)}/transfer_owner`, { method:'POST', body: JSON.stringify({ to_email: toEmail }) }); }
 
-/* ---------------- SNAPSHOT & OP-LOG (v11) ---------------- */
-async function fetchState(){ const r=await apiFetch(`state?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`); if(!r.ok) throw new Error('state_failed'); return r.json(); }
-async function syncSince(since){
+/* ---------------- v10.3 TASKS API ---------------- */
+async function fetchTabs_v10(){ const r=await apiFetch(`tasks?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`); if(!r.ok) return {}; const j=await r.json().catch(()=>({tabs:{}})); return j.tabs||{}; }
+async function saveTabsHTTP_v10(tabs){ await apiFetch('tasks', { method:'POST', body: JSON.stringify({ workspace_id: WORKSPACE_ID, tabs }) }); }
+
+/* ---------------- v11 OP-LOG API ---------------- */
+async function fetchState_v11(){ const r=await apiFetch(`state?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`); if(!r.ok) throw new Error('state_failed'); return r.json(); }
+async function syncSince_v11(since){
   try{
     const r = await apiFetch(`sync?workspace_id=${encodeURIComponent(WORKSPACE_ID)}&since=${since}`);
     if(!r.ok) return;
     const data = await r.json();
     if(data.mode==='snapshot'){
-      tabData = sanitizeTabs(data.tabs||{});
+      tabData = sanitizeTabs_v11(data.tabs||{});
       lastSeq = Number(data.base_seq||0);
-      renderAll();
-      stampSync();
+      if(!tabData[activeTab]) activeTab = Object.keys(tabData)[0]||activeTab;
+      renderTabs(); switchTab(activeTab); stampSync();
     } else if (data.mode==='ops'){
       const ops = data.ops||[];
       if(ops.length){
-        applyOpsInOrder(ops);
+        applyOpsInOrder_v11(ops);
         lastSeq = Number(ops[ops.length-1].seq||lastSeq);
-        renderAll();
-        stampSync();
+        if(!isEditing && !isDragging){
+          if(!tabData[activeTab]) activeTab = Object.keys(tabData)[0]||activeTab;
+          renderTabs(); switchTab(activeTab); stampSync();
+        } else { hasRemoteDuringEdit = true; }
       }
     }
   }catch{}
 }
-function sanitizeTabs(tabs){
+function sanitizeTabs_v11(tabs){
   const out = {};
   Object.keys(tabs||{}).forEach(tab=>{
     out[tab] = { todo:[], inprogress:[], done:[] };
     COLS.forEach(c=>{
       const list = Array.isArray(tabs[tab]?.[c])?tabs[tab][c]:[];
-      const mapped = list.map(normalizeTaskJS);
+      const mapped = list.map(normalizeTaskJS_v11);
       mapped.sort((a,b)=> (a.pos||0)-(b.pos||0)); mapped.forEach((t,i)=> t.pos=i+1);
       out[tab][c]=mapped;
     });
   });
   return out;
 }
-function normalizeTaskJS(t){
+function normalizeTaskJS_v11(t){
   return {
     id: String(t.id||'').trim() || `task-${uuid()}`,
     content: typeof t.content==='string'?t.content:'',
@@ -273,19 +290,15 @@ function normalizeTaskJS(t){
     by: t.by||null
   };
 }
-function applyOpsInOrder(ops){ for(const op of ops){ tabData = applyOpToTabs(tabData, op); } }
-function ensureTabShape(obj, tab){
-  if (!obj[tab]) obj[tab] = { todo:[], inprogress:[], done:[] };
-  COLS.forEach(c=>{ if(!Array.isArray(obj[tab][c])) obj[tab][c]=[]; });
-}
+function applyOpsInOrder_v11(ops){ for(const op of ops){ tabData = applyOpToTabs_v11(tabData, op); } }
 function reindex(list){ list.forEach((t,i)=> t.pos=i+1); }
-function applyOpToTabs(currTabs, op){
+function applyOpToTabs_v11(currTabs, op){
   const tabs = JSON.parse(JSON.stringify(currTabs||{}));
   const p = op.payload||{};
   if(op.type==='create_task'){
     const tab = String(p.tab||'Default'); ensureTabShape(tabs, tab);
     const col = COLS.includes(p.column)?p.column:'todo';
-    const task = normalizeTaskJS(p.task||{});
+    const task = normalizeTaskJS_v11(p.task||{});
     const list = tabs[tab][col];
     if(Number.isFinite(+task.pos)){ let idx=list.findIndex(x=>x.pos>task.pos); if(idx<0) idx=list.length; list.splice(idx,0,task); reindex(list); }
     else { task.pos=(list[list.length-1]?.pos||0)+1; list.push(task); }
@@ -320,13 +333,17 @@ function applyOpToTabs(currTabs, op){
   }
   return tabs;
 }
-function newPosBetween(prev, next){ const A=Number.isFinite(prev)?+prev:0; const B=Number.isFinite(next)?+next:A+2; if (B-A>1e-6) return A+(B-A)/2; return A+0.000001; }
+function ensureTabShape(tabs, tab){
+  if (!tabs[tab]) tabs[tab] = { todo:[], inprogress:[], done:[] };
+  COLS.forEach(c=>{ if(!Array.isArray(tabs[tab][c])) tabs[tab][c]=[]; });
+}
+function newPosBetween(prev, next){ const A=Number.isFinite(prev)?+prev:0; const B=Number.isFinite(next)?+next:A+2; if(B-A>1e-6) return A+(B-A)/2; return A+0.000001; }
 
-async function sendOp(type, payload){
+async function sendOp_v11(type, payload){
   const op = { type, op_id: uuid(), client_id: currentUserKey||'unknown', base_seq: lastSeq||0, ts: Date.now(), payload: payload||{} };
-  // optimistic apply
-  tabData = applyOpToTabs(tabData, { ...op, seq: lastSeq+1 });
-  renderBoard();
+  // optimistic
+  tabData = applyOpToTabs_v11(tabData, { ...op, seq: lastSeq+1 });
+  renderTabs(); switchTab(activeTab);
 
   if (wsConnected) { try{ ws.send(JSON.stringify({ type:'op:append', ws: WORKSPACE_ID, op })); return; }catch{} }
   try{ await apiFetch('ops',{ method:'POST', body: JSON.stringify({ workspace_id: WORKSPACE_ID, op }) }); }catch{}
@@ -346,13 +363,13 @@ async function presencePollHTTP(){
   }catch{}
 }
 
-/* ---------------- LIVE WS ---------------- */
+/* ---------------- LIVE (both modes) ---------------- */
 function liveUrl(){ try{ const u=new URL(API_BASE); u.pathname=(u.pathname.replace(/\/+$/,'')+'/live').replace(/\/{2,}/g,'/'); u.search=`?ws=${encodeURIComponent(WORKSPACE_ID)}&token=${encodeURIComponent(sessionJWT)}`; u.protocol=u.protocol.replace('http','ws'); return u.toString(); }catch{ return null; } }
 function connectLive(){
   const url = liveUrl(); if(!url) { startHTTPFallback(); return; }
   try { ws = new WebSocket(url); } catch { startHTTPFallback(); return; }
 
-  ws.onopen = ()=>{ wsConnected = true; stopSyncPolling(); };
+  ws.onopen = ()=>{ wsConnected = true; if(MODE==='v10') stopTaskPolling(); if(MODE==='v11') stopSyncPolling(); };
   ws.onclose = ()=>{ wsConnected = false; startHTTPFallback(); };
   ws.onerror = ()=>{ wsConnected = false; startHTTPFallback(); };
   ws.onmessage = async (ev)=>{
@@ -360,30 +377,51 @@ function connectLive(){
     if(msg.type==='hello' && msg.ws===WORKSPACE_ID){
       currentUserKey = msg.you?.user_id || currentUserKey;
       presence.clear(); (msg.online||[]).forEach(p=> presence.set(p.id, { name:p.name, email:p.email })); renderPresence();
-      if (Number(msg.maxseq||0) > lastSeq) { await syncSince(lastSeq); }
+      if (MODE==='v10') {
+        const changed = mergeRemoteTabs_v10(migrateShapes_v10(msg.tabs||{}));
+        if (!activeTab) activeTab = Object.keys(tabData)[0];
+        if (changed) { renderTabs(); switchTab(activeTab); stampSync(); }
+      } else {
+        const maxseq = Number(msg.maxseq||0);
+        if (maxseq > lastSeq) await syncSince_v11(lastSeq);
+      }
       return;
     }
-    if(msg.type==='op' && msg.ws===WORKSPACE_ID){
+    if(msg.type==='tabs:set' && MODE==='v10' && msg.ws===WORKSPACE_ID){
+      const fromSelf = !!msg.by && msg.by === currentUserKey;
+      const changed = mergeRemoteTabs_v10(migrateShapes_v10(msg.tabs||{}));
+      if (!isEditing && !isDragging && (!fromSelf || changed)) {
+        if(!tabData[activeTab]) activeTab = Object.keys(tabData)[0]||null;
+        renderTabs(); switchTab(activeTab); stampSync();
+      } else {
+        hasRemoteDuringEdit = true;
+      }
+      return;
+    }
+    if(msg.type==='op' && MODE==='v11' && msg.ws===WORKSPACE_ID){
       const seq = Number(msg.seq||0);
-      if (seq !== lastSeq + 1) { await syncSince(lastSeq); return; }
-      tabData = applyOpToTabs(tabData, msg.op||{});
+      if (seq !== lastSeq + 1) { await syncSince_v11(lastSeq); return; }
+      tabData = applyOpToTabs_v11(tabData, msg.op||{});
       lastSeq = seq;
-      if (!isEditing && !isDragging) { renderBoard(); stampSync(); } else { hasRemoteDuringEdit = true; }
+      if (!isEditing && !isDragging) { renderTabs(); switchTab(activeTab); stampSync(); } else { hasRemoteDuringEdit = true; }
       return;
     }
     if(msg.type==='presence/join'){ if(msg.by && msg.by!==currentUserKey){ presence.set(msg.by, { name:msg.name||'', email:msg.email||'' }); renderPresence(); } return; }
     if(msg.type==='presence/leave'){ presence.delete(msg.by); renderPresence(); return; }
   };
 }
+function liveSend_v10(obj){ if(ws && ws.readyState===1){ try{ ws.send(JSON.stringify({ ...obj, ws: WORKSPACE_ID })); }catch{} } }
 
-/* ---------------- UI ---------------- */
+/* ---------------- PRESENCE UI ---------------- */
 function renderPresence(){
   const avatars=document.getElementById('presenceAvatars');
   const list=document.getElementById('presenceList');
   const count=document.getElementById('presenceCount');
   avatars.innerHTML=''; list.innerHTML='';
+
   const others = [...presence.entries()].map(([id,v])=>({id,...v})).sort((a,b)=>(a.name||a.email).localeCompare(b.name||b.email));
   count.textContent = others.length ? '' : '0 online';
+
   const max=4;
   others.slice(0,max).forEach(p=>{
     const span=document.createElement('span');
@@ -391,6 +429,7 @@ function renderPresence(){
     span.title=p.name||p.email; span.textContent=initials(p.name,p.email);
     const dot=document.createElement('span'); dot.className='presence-dot'; span.appendChild(dot);
     avatars.appendChild(span);
+
     const row=document.createElement('div');
     row.className='flex items-center gap-2';
     row.innerHTML=`<div class="relative inline-flex items-center justify-center h-6 w-6 rounded-full bg-indigo-600/10 text-indigo-700 dark:text-indigo-300 text-[10px] font-semibold">
@@ -405,18 +444,84 @@ function renderPresence(){
     more.textContent = `+${extra}`; avatars.appendChild(more);
   }
 }
+document.getElementById('presenceBtn').onclick = ()=>{
+  document.getElementById('presenceTooltip').classList.toggle('hidden');
+};
 
-function renderTabSelector(){
-  const names = Object.keys(tabData);
-  const sel = document.getElementById('tabSelect');
-  const cur = sel.value;
-  sel.innerHTML = '';
-  names.forEach(n=>{ const o=document.createElement('option'); o.value=n; o.text=n; sel.appendChild(o); });
-  sel.value = names.includes(activeTab)?activeTab:(names[0]||'');
-  activeTab = sel.value;
+/* ---------------- MERGE helpers (v10) ---------------- */
+function migrateShapes_v10(data){
+  const out=JSON.parse(JSON.stringify(data||{}));
+  Object.keys(out).forEach(tab=>{
+    COLS.forEach(col=>{
+      let pos=1;
+      out[tab][col]=(out[tab][col]||[]).map(t=>({
+        id: t.id||`task-${uuid()}`,
+        content: typeof t.content==='string'?t.content:'',
+        dueDate: normalizeDateString(t.dueDate),
+        priority: ['High','Medium','Low'].includes(t.priority)?t.priority:'Medium',
+        pos: Number.isFinite(+t.pos)?+t.pos:pos++,
+        upd: Number.isFinite(+t.upd)?+t.upd:Date.now(),
+        by: t.by||currentUserKey||'unknown'
+      }));
+    });
+  });
+  return out;
+}
+function mergeRemoteTabs_v10(remote){
+  const prevJSON = JSON.stringify(tabData);
+  const local = tabData;
+  const editingIds = new Set(editingTasks);
+  tabData = JSON.parse(JSON.stringify(remote||{}));
+  if (editingIds.size){
+    for (const tabName of Object.keys(tabData)) {
+      for (const col of COLS) {
+        const list = tabData[tabName][col] || [];
+        for (let i=0;i<list.length;i++){
+          const t = list[i]; if (editingIds.has(t.id)){
+            const lt = findTask(local, t.id);
+            if (lt){ list[i] = { ...t, content: lt.content, dueDate: lt.dueDate, priority: lt.priority, pos: lt.pos, upd: lt.upd, by: lt.by }; }
+          }
+        }
+      }
+    }
+  }
+  return JSON.stringify(tabData) !== prevJSON;
+}
+function findTask(data, id){
+  for (const tab of Object.keys(data||{})){ for (const c of COLS){ const hit = (data[tab][c]||[]).find(x=>x.id===id); if (hit) return hit; } }
+  return null;
 }
 
-function ensureAtLeastOne(){ const cols=tabData[activeTab]; if(!cols) return; /* no auto-insert */ }
+/* ---------------- RENDER ---------------- */
+function renderTabs(){
+  const node=document.getElementById('tabs'); node.innerHTML='';
+  const names=Object.keys(tabData);
+  names.forEach(name=>{
+    const b=document.createElement('button');
+    b.className='tab-button px-4 py-1.5 rounded-full text-sm font-medium bg-transparent border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:border-indigo-500 hover:text-indigo-600 dark:hover:text-white transition-all duration-150 truncate max-w-[160px]';
+    if(name===activeTab){ b.classList.add('border-indigo-500','text-indigo-700','dark:text-white','font-semibold','bg-indigo-50','dark:bg-indigo-600/30'); }
+    b.dataset.tab=name; b.textContent=name;
+    b.onclick=()=>{ switchTab(name); };
+    b.ondblclick=()=>{ if(currentRole==='viewer') return; const nn=prompt('Rename tab:',name); if(!nn||!nn.trim()||nn===name||tabData[nn])return;
+      if (MODE==='v11') { sendOp_v11('rename_tab', { from: name, to: nn }); activeTab = nn; }
+      else { tabData[nn]=tabData[name]; delete tabData[name]; if(activeTab===name) activeTab=nn; renderTabs(); switchTab(activeTab); pushTabs_v10(); }
+    };
+    b.oncontextmenu=(e)=>{ e.preventDefault(); if(currentRole==='viewer')return;
+      if(confirm(`Delete tab "${name}"?`)){
+        if (MODE==='v11') {
+          const lists = COLS.flatMap(c=> (tabData[name]?.[c]||[]));
+          lists.forEach(t=> sendOp_v11('delete_task', { task_id: t.id }));
+          delete tabData[name]; if(activeTab===name) activeTab=Object.keys(tabData)[0]||null; renderTabs(); switchTab(activeTab);
+        } else {
+          delete tabData[name]; if(activeTab===name) activeTab=Object.keys(tabData)[0]||null; renderTabs(); renderBoard(); pushTabs_v10();
+        }
+      }
+    };
+    node.appendChild(b);
+  });
+}
+function switchTab(tab){ if(!tabData[tab]) return; activeTab=tab; document.querySelectorAll('.tab-button').forEach(x=>x.classList.remove('border-indigo-500','text-indigo-700','dark:text-white','font-semibold','bg-indigo-50','dark:bg-indigo-600/30')); const btn=[...document.querySelectorAll('.tab-button')].find(b=>b.dataset.tab===tab); if(btn) btn.classList.add('border-indigo-500','text-indigo-700','dark:text-white','font-semibold','bg-indigo-50','dark:bg-indigo-600/30'); renderBoard(); }
+function ensureAtLeastOne(){ const cols=tabData[activeTab]; if(!cols) return; if((cols.todo?.length||0)+(cols.inprogress?.length||0)+(cols.done?.length||0)===0){ const id=`task-${uuid()}`; cols.todo.push({ id, content:'', dueDate:'', priority:'Medium', pos:1, upd:Date.now(), by: currentUserKey }); } }
 
 function createTaskElement(id, content='', dueDate='', priority='Medium', column){
   const w=document.createElement('div');
@@ -431,28 +536,31 @@ function createTaskElement(id, content='', dueDate='', priority='Medium', column
   const dateInput=document.createElement('input'); dateInput.type='date'; dateInput.value=normalizeDateString(dueDate)||''; dateInput.disabled=(currentRole==='viewer'); dateInput.className='mt-1 text-xs bg-transparent text-gray-700 dark:text-gray-200 border border-transparent rounded px-1 date-badge';
   const prioritySelect=document.createElement('select'); prioritySelect.disabled=(currentRole==='viewer'); prioritySelect.className='mt-1 ml-2 text-xs bg-transparent text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-gray-600 rounded px-1';
   ['High','Medium','Low'].forEach(level=>{ const o=document.createElement('option'); o.value=level; o.text=level; if(level===priority) o.selected=true; prioritySelect.appendChild(o); });
-  const del=document.createElement('button'); del.className='absolute top-2 right-2 text-gray-400 hover:text-red-500'; del.innerHTML='<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>'; del.title='Delete Task'; del.onclick=()=>{ if(currentRole==='viewer')return; if(confirm('Delete this task?')) sendOp('delete_task',{ task_id:id }); };
+  const del=document.createElement('button'); del.className='absolute top-2 right-2 text-gray-400 hover:text-red-500'; del.innerHTML='<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>'; del.title='Delete Task';
+  del.onclick=()=>{ if(currentRole==='viewer')return; if(!confirm('Delete this task?')) return; if(MODE==='v11'){ sendOp_v11('delete_task',{ task_id:id }); } else { removeTaskById_v10(id); } };
 
+  // Smooth typing flags
   editable.addEventListener('focus', ()=>{ isEditing=true; editingTasks.add(id); });
-  editable.addEventListener('blur', ()=>{ editingTasks.delete(id); if(editingTasks.size===0){ isEditing=false; if(hasRemoteDuringEdit){ hasRemoteDuringEdit=false; renderBoard(); stampSync(); } } });
-  editable.addEventListener('input', ()=>{ toggle(); sendOp('update_task_field',{ task_id:id, field:'content', value: editable.innerText.trim() }); });
+  editable.addEventListener('blur', ()=>{ editingTasks.delete(id); if(editingTasks.size===0){ isEditing=false; if(hasRemoteDuringEdit){ hasRemoteDuringEdit=false; renderTabs(); switchTab(activeTab); stampSync(); } } });
+  editable.addEventListener('input', ()=>{ toggle(); if(MODE==='v11'){ sendOp_v11('update_task_field',{ task_id:id, field:'content', value: editable.innerText.trim() }); } else { persistTaskEdits_v10(id,{ content: editable.innerText.trim() }); } });
 
   dateInput.addEventListener('focus', ()=>{ isEditing=true; editingTasks.add(id); });
-  dateInput.addEventListener('blur', ()=>{ editingTasks.delete(id); if(editingTasks.size===0){ isEditing=false; if(hasRemoteDuringEdit){ hasRemoteDuringEdit=false; renderBoard(); stampSync(); } } });
-  dateInput.addEventListener('change', ()=> sendOp('update_task_field',{ task_id:id, field:'dueDate', value: normalizeDateString(dateInput.value) }));
+  dateInput.addEventListener('blur', ()=>{ editingTasks.delete(id); if(editingTasks.size===0){ isEditing=false; if(hasRemoteDuringEdit){ hasRemoteDuringEdit=false; renderTabs(); switchTab(activeTab); stampSync(); } } });
+  dateInput.addEventListener('change', ()=>{ const val=normalizeDateString(dateInput.value); if(MODE==='v11'){ sendOp_v11('update_task_field',{ task_id:id, field:'dueDate', value: val }); } else { persistTaskEdits_v10(id,{ dueDate: val }); } });
 
   prioritySelect.addEventListener('focus', ()=>{ isEditing=true; editingTasks.add(id); });
-  prioritySelect.addEventListener('blur', ()=>{ editingTasks.delete(id); if(editingTasks.size===0){ isEditing=false; if(hasRemoteDuringEdit){ hasRemoteDuringEdit=false; renderBoard(); stampSync(); } } });
-  prioritySelect.addEventListener('change', ()=> sendOp('update_task_field',{ task_id:id, field:'priority', value: prioritySelect.value||'Medium' }));
+  prioritySelect.addEventListener('blur', ()=>{ editingTasks.delete(id); if(editingTasks.size===0){ isEditing=false; if(hasRemoteDuringEdit){ hasRemoteDuringEdit=false; renderTabs(); switchTab(activeTab); stampSync(); } } });
+  prioritySelect.addEventListener('change', ()=>{ const val=prioritySelect.value||'Medium'; if(MODE==='v11'){ sendOp_v11('update_task_field',{ task_id:id, field:'priority', value: val }); } else { persistTaskEdits_v10(id,{ priority: val }); } });
 
   w.addEventListener('dragstart',e=>{ if(currentRole==='viewer'){ e.preventDefault(); return; } isDragging=true; w.classList.add('dragging'); e.dataTransfer.setData('text/plain',id); dragContext.id=id; dragContext.fromCol=w.getAttribute('data-column'); });
-  w.addEventListener('dragend',()=>{ isDragging=false; w.classList.remove('dragging'); if(hasRemoteDuringEdit){ hasRemoteDuringEdit=false; renderBoard(); stampSync(); } });
+  w.addEventListener('dragend',()=>{ isDragging=false; w.classList.remove('dragging'); if(hasRemoteDuringEdit){ hasRemoteDuringEdit=false; renderTabs(); switchTab(activeTab); stampSync(); } });
 
   row.appendChild(dateInput); row.appendChild(prioritySelect);
   w.appendChild(editable); w.appendChild(placeholder); w.appendChild(row); w.appendChild(del);
   toggle();
   return w;
 }
+
 const dragContext = { id:null, fromCol:null, overCol:null, insertIndex:null };
 function clearDrag(){ dragContext.id=null; dragContext.fromCol=null; dragContext.overCol=null; dragContext.insertIndex=null; }
 function getAfter(container, y){
@@ -466,11 +574,9 @@ function computeInsertIndex(colEl, indicator){
   for(let i=0;i<all.length;i++){ const el=all[i]; if(el===indicator){ index=[...all.slice(0,i)].filter(n=>n.hasAttribute && n.hasAttribute('data-task')).length; return index; } }
   return siblings.length;
 }
+
 function renderBoard(){
-  renderTabSelector();
-  if(!activeTab || !tabData[activeTab]) return;
-  ensureAtLeastOne();
-  ['todo','inprogress','done'].forEach(col=>{
+  COLS.forEach(col=>{
     const colEl=document.getElementById(col);
     colEl.querySelectorAll('[data-task]')?.forEach(n=>n.remove());
 
@@ -488,19 +594,73 @@ function renderBoard(){
       e.preventDefault();
       colEl.classList.remove('drag-over','show-drop');
       const id=dragContext.id; if(!id) return;
-      const list = tabData[activeTab][dragContext.overCol]||[];
-      const prev = list[dragContext.insertIndex-1]?.pos;
-      const next = list[dragContext.insertIndex]?.pos;
-      const pos = newPosBetween(prev, next);
-      sendOp('move_task', { task_id:id, to: colEl.dataset.col, pos });
+      if(MODE==='v11'){
+        const list = tabData[activeTab][dragContext.overCol]||[];
+        const prev = list[dragContext.insertIndex-1]?.pos;
+        const next = list[dragContext.insertIndex]?.pos;
+        const pos = newPosBetween(prev, next);
+        sendOp_v11('move_task', { task_id:id, to: colEl.dataset.col, pos });
+      } else {
+        commitReorder_v10(id, dragContext.fromCol, colEl.dataset.col, dragContext.insertIndex);
+      }
       clearDrag();
     };
+  });
 
-    (tabData[activeTab][col]||[]).sort((a,b)=> (a.pos||0)-(b.pos||0)).forEach(t=> colEl.appendChild(createTaskElement(t.id,t.content,t.dueDate,t.priority,col)));
+  if(!activeTab || !tabData[activeTab]) return;
+  ensureAtLeastOne();
+  const data=tabData[activeTab];
+  COLS.forEach(col=>{
+    const colEl=document.getElementById(col);
+    (data[col]||[]).sort((a,b)=> (a.pos||0)-(b.pos||0)).forEach(t=> colEl.appendChild(createTaskElement(t.id,t.content,t.dueDate,t.priority,col,t.pos)));
   });
 }
 
-/* ---------------- Members Modal ---------------- */
+/* ---------------- Mutations (v10) ---------------- */
+function persistTaskEdits_v10(taskId, patch){
+  if(!activeTab || !tabData[activeTab]) return;
+  for(const col of COLS){
+    const list=tabData[activeTab][col]||[];
+    const idx=list.findIndex(t=>t.id===taskId);
+    if(idx!==-1){
+      if('dueDate' in patch) patch.dueDate = normalizeDateString(patch.dueDate);
+      list[idx] = { ...list[idx], ...patch, upd: Date.now(), by: currentUserKey };
+      break;
+    }
+  }
+  pushTabs_v10();
+}
+function removeTaskById_v10(taskId){
+  if(!activeTab || !tabData[activeTab]) return;
+  for(const col of COLS){
+    const list=tabData[activeTab][col]||[];
+    const idx=list.findIndex(t=>t.id===taskId);
+    if(idx!==-1){ list.splice(idx,1); break; }
+  }
+  renderBoard(); pushTabs_v10();
+}
+function commitReorder_v10(taskId, fromCol, toCol, insertIndex){
+  if(currentRole==='viewer') return;
+  const cols=tabData[activeTab];
+  let moved; const fromList=cols[fromCol]||[]; const i=fromList.findIndex(t=>t.id===taskId);
+  if(i!==-1){ moved=fromList.splice(i,1)[0]; }
+  if(!moved) return;
+  const target=cols[toCol]=cols[toCol]||[];
+  if(insertIndex==null||insertIndex<0) insertIndex=target.length;
+  if(insertIndex>target.length) insertIndex=target.length;
+  const prev=target[insertIndex-1]?.pos, next=target[insertIndex]?.pos;
+  moved.pos=newPosBetween(prev,next); moved.upd=Date.now(); moved.by=currentUserKey;
+  target.splice(insertIndex,0,moved);
+  if(!Number.isFinite(prev)||!Number.isFinite(next)||Math.abs((next||moved.pos)-(prev||0))<1e-6){ reindex(target); }
+  renderBoard(); pushTabs_v10();
+}
+const pushTabs_v10 = debounce(()=> {
+  try { liveSend_v10({ type:'tabs:update', tabs: tabData }); } catch {}
+  saveTabsHTTP_v10(tabData).catch(()=>{});
+  stampSync();
+}, 250);
+
+/* ---------------- Members UI ---------------- */
 function openMembers(){ document.getElementById('membersModal').classList.remove('hidden'); renderMembers(); }
 function closeMembers(){ document.getElementById('membersModal').classList.add('hidden'); }
 async function renderMembers(){
@@ -541,106 +701,89 @@ async function renderMembers(){
   });
 }
 
-/* ---------------- Boot / Fallback orchestration ---------------- */
+/* ---------------- Boot / fallback orchestration ---------------- */
 function setReportsHref(){
   const btn=document.getElementById('reportsLink');
   if(btn){ btn.onclick=()=>{ if(!WORKSPACE_ID){ alert('Open a workspace first.'); return; } location.href=`reports.html?ws=${encodeURIComponent(WORKSPACE_ID)}`; }; }
   const logo=document.getElementById('workspacesLink'); if(logo){ logo.href='workspace.html'; }
 }
+function stopTaskPolling(){ if(taskPollTimer){ clearInterval(taskPollTimer); taskPollTimer=null; } }
 function stopSyncPolling(){ if(syncPollTimer){ clearInterval(syncPollTimer); syncPollTimer=null; } }
 function startHTTPFallback(){
   if(!presenceBeatTimer){ presenceBeatHTTP(); presenceBeatTimer = setInterval(presenceBeatHTTP, 10000); }
   if(!presencePollTimer){ presencePollHTTP(); presencePollTimer = setInterval(presencePollHTTP, 5000); }
-  if(!syncPollTimer){ syncPollTimer = setInterval(async ()=>{ if(isEditing||isDragging) return; await syncSince(lastSeq); }, 1500); }
+  if(MODE==='v10'){
+    if(!taskPollTimer){
+      taskPollTimer = setInterval(async ()=>{
+        try{
+          const serverTabs = migrateShapes_v10(await fetchTabs_v10());
+          if (isEditing || isDragging){
+            const changed = mergeRemoteTabs_v10(serverTabs);
+            if (changed) hasRemoteDuringEdit = true;
+            return;
+          }
+          const changed = mergeRemoteTabs_v10(serverTabs);
+          if (changed){
+            if(!tabData[activeTab]) activeTab = Object.keys(tabData)[0]||activeTab;
+            renderTabs(); switchTab(activeTab); stampSync();
+          }
+        }catch{}
+      }, 2000);
+    }
+  } else {
+    if(!syncPollTimer){
+      syncPollTimer = setInterval(async ()=>{ if(isEditing||isDragging) return; await syncSince_v11(lastSeq); }, 1500);
+    }
+  }
 }
 
-async function chooseWorkspaceId(){
-  const url=new URL(location.href);
-  let wid = url.searchParams.get('ws') || localStorage.getItem('solara_last_ws') || '';
-  if (wid) return wid;
-  const r = await apiFetch('workspaces'); const j = r.ok? await r.json(): { workspaces:[] };
-  const first = (j.workspaces||[])[0];
-  if (first) wid = first.id;
-  else {
-    const created = await apiFetch('workspaces', { method:'POST', body: JSON.stringify({ name: 'Personal' }) }).then(r=>r.json()).catch(()=>null);
-    wid = created?.workspace?.id || '';
-  }
-  if (wid){
-    localStorage.setItem('solara_last_ws', wid);
-    const u = new URL(location.href); u.searchParams.set('ws', wid); history.replaceState(null,'',u.toString());
-  }
-  return wid;
-}
-
-async function boot(){
-  const ok = await verifySessionAndHydrate();
-  if(!ok){ location.replace('/sign-in.html'); return; }
-
-  setReportsHref();
-
-  WORKSPACE_ID = await chooseWorkspaceId();
-  if(!WORKSPACE_ID){ document.getElementById('wsBanner').classList.remove('hidden'); return; }
-
-  currentRole = await fetchRole();
-  const wlist = await apiFetch('workspaces').then(r=>r.ok?r.json():{workspaces:[]}).catch(()=>({workspaces:[]}));
-  const wsRow = (wlist.workspaces||[]).find(w=>w.id===WORKSPACE_ID);
-  WORKSPACE_NAME = wsRow?.name || '';
-  document.getElementById('wsName').textContent = WORKSPACE_NAME || '—';
-  if (wsRow && wsRow.owner_id && currentRole !== 'owner' && wsRow.owner_id === currentUserKey) currentRole = 'owner';
-
-  try{
-    const state = await fetchState();
-    tabData = sanitizeTabs(state.tabs||{});
-    lastSeq = Number(state.base_seq||0);
-  }catch{
-    tabData = {}; lastSeq = 0;
-  }
-  if(Object.keys(tabData).length===0){ tabData['Click to edit']={ todo:[], inprogress:[], done:[] }; }
-  activeTab = Object.keys(tabData)[0];
-  renderBoard();
-
-  startHTTPFallback();
-  connectLive();
-
-  stampSync();
-}
-
-/* ---------------- Events ---------------- */
 document.getElementById('addTabBtn').onclick = ()=>{
   if(currentRole==='viewer') return;
-  const name=prompt('Enter tab name:'); if(!name||!name.trim()) return; const n=name.trim();
-  if(tabData[n]) return alert('Tab already exists.');
-  tabData[n] = { todo:[], inprogress:[], done:[] };
-  renderBoard();
+  const name=prompt('Enter tab name:'); if(!name||!name.trim()) return;
+  const n=name.trim(); if(tabData[n]) return switchTab(n);
+  if (MODE==='v11'){
+    activeTab = n;
+    // Persist immediately by creating a blank task in the new tab (so it exists server-side)
+    const id=`task-${uuid()}`;
+    sendOp_v11('create_task', { tab: n, column:'todo', task:{ id, content:'', dueDate:'', priority:'Medium', pos: 1 }});
+  } else {
+    tabData[n]={ todo:[], inprogress:[], done:[] }; renderTabs(); switchTab(n); pushTabs_v10();
+  }
 };
-document.getElementById('renameTabBtn').onclick = ()=>{
-  const cur = activeTab; const nn = prompt('Rename tab:', cur);
-  if(!nn||!nn.trim()||nn===cur||tabData[nn]) return;
-  sendOp('rename_tab', { from: cur, to: nn });
-};
-document.getElementById('deleteTabBtn').onclick = ()=>{
-  const cur = activeTab; if(!confirm(`Delete tab "${cur}"?`)) return;
-  const lists = COLS.flatMap(c=> (tabData[cur]?.[c]||[]));
-  lists.forEach(t=> sendOp('delete_task', { task_id: t.id }));
-  delete tabData[cur]; activeTab = Object.keys(tabData)[0]||null; renderBoard();
-};
-document.getElementById('tabSelect').onchange = (e)=>{ activeTab = e.target.value; renderBoard(); };
 
 document.getElementById('newTaskBtn').onclick = ()=>{
   if(currentRole==='viewer') return;
-  if(!activeTab){ tabData['Click to edit']={ todo:[], inprogress:[], done:[] }; activeTab='Click to edit'; }
-  const list = tabData[activeTab]?.todo||[]; const pos=(list[list.length-1]?.pos||0)+1;
-  const id = `task-${uuid()}`;
-  sendOp('create_task', { tab: activeTab, column:'todo', task:{ id, content:'', dueDate:'', priority:'Medium', pos }});
-  setTimeout(()=>{ document.getElementById(id)?.querySelector('.editable')?.focus(); }, 50);
+  if(!activeTab){ const def='Click to edit'; if(!tabData[def]) tabData[def]={ todo:[], inprogress:[], done:[] }; activeTab=def; renderTabs(); }
+  if (MODE==='v11'){
+    const list = tabData[activeTab]?.todo||[]; const pos=(list[list.length-1]?.pos||0)+1;
+    const id=`task-${uuid()}`;
+    sendOp_v11('create_task', { tab: activeTab, column:'todo', task:{ id, content:'', dueDate:'', priority:'Medium', pos }});
+    setTimeout(()=>{ document.getElementById(id)?.querySelector('.editable')?.focus(); }, 50);
+  } else {
+    const id=`task-${uuid()}`; const t={ id, content:'', dueDate:'', priority:'Medium', pos:(tabData[activeTab].todo.slice(-1)[0]?.pos||0)+1, upd:Date.now(), by:currentUserKey };
+    tabData[activeTab].todo.push(t); renderBoard(); pushTabs_v10(); setTimeout(()=>{ document.getElementById(id)?.querySelector('.editable')?.focus(); }, 50);
+  }
 };
+
 document.getElementById('clearBtn').onclick = ()=>{
   if(currentRole==='viewer') return;
   if(!activeTab) return;
   if(!confirm('Clear all tasks in this tab?')) return;
-  const lists = COLS.flatMap(c=> (tabData[activeTab]?.[c]||[]));
-  lists.forEach(t=> sendOp('delete_task', { task_id: t.id }));
+  if (MODE==='v11'){
+    const lists = COLS.flatMap(c=> (tabData[activeTab]?.[c]||[]));
+    lists.forEach(t=> sendOp_v11('delete_task', { task_id: t.id }));
+  } else {
+    tabData[activeTab] = { todo:[], inprogress:[], done:[] };
+    renderBoard(); pushTabs_v10();
+  }
 };
+
+document.getElementById('exportBtn').onclick = ()=>{
+  const board=document.getElementById('board');
+  html2pdf().set({ margin:.5, filename:'Solara-Board.pdf', image:{type:'jpeg',quality:.98}, html2canvas:{scale:2}, jsPDF:{unit:'in', format:'letter', orientation:'landscape'} }).from(board).save();
+};
+
+document.getElementById('manageBtn').onclick = ()=>{ if(!WORKSPACE_ID) return alert('Open a workspace first.'); openMembers(); };
 
 document.getElementById('userButton').onclick = ()=> document.getElementById('userMenu').classList.toggle('hidden');
 document.getElementById('addUserBtn').onclick = ()=> openMembers();
@@ -654,7 +797,67 @@ document.getElementById('inviteBtn').onclick = async ()=>{
   const r=await invite(email); if(r.ok){ input.value=''; renderMembers(); alert('Invitation created.'); } else { alert('Invite failed.'); }
 };
 
+function chooseWorkspaceIdFromURL(){
+  const url=new URL(location.href);
+  let wid = url.searchParams.get('ws') || localStorage.getItem('solara_last_ws') || '';
+  if (wid) { localStorage.setItem('solara_last_ws', wid); return wid; }
+  return '';
+}
+
+async function detectMode(){
+  try{
+    // If /state works, it's v11
+    const r = await apiFetch(`state?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`);
+    if (r.ok) { MODE='v11'; return 'v11'; }
+  }catch{}
+  MODE='v10'; return 'v10';
+}
+
+async function boot(){
+  const ok = await verifySessionAndHydrate();
+  if(!ok){ location.replace('/sign-in.html'); return; }
+
+  WORKSPACE_ID = chooseWorkspaceIdFromURL();
+  if(!WORKSPACE_ID){ document.getElementById('wsBanner').classList.remove('hidden'); }
+
+  setReportsHref();
+
+  // Role + Name
+  currentRole = WORKSPACE_ID ? (await fetchRole()) : 'viewer';
+  const wlist = await apiFetch('workspaces').then(r=>r.ok?r.json():{workspaces:[]}).catch(()=>({workspaces:[]}));
+  const wsRow = (wlist.workspaces||[]).find(w=>w.id===WORKSPACE_ID);
+  WORKSPACE_NAME = wsRow?.name || '';
+  document.getElementById('wsName').textContent = WORKSPACE_NAME || '—';
+  if (wsRow && wsRow.owner_id && currentRole !== 'owner' && wsRow.owner_id === currentUserKey) currentRole = 'owner';
+
+  if (!WORKSPACE_ID){ startHTTPFallback(); return; }
+
+  await detectMode();
+
+  if (MODE==='v11'){
+    try{
+      const state = await fetchState_v11();
+      tabData = sanitizeTabs_v11(state.tabs||{});
+      lastSeq = Number(state.base_seq||0);
+    }catch{ tabData = {}; lastSeq = 0; }
+    if(Object.keys(tabData).length===0){ tabData['Click to edit']={ todo:[], inprogress:[], done:[] }; }
+    activeTab = Object.keys(tabData)[0];
+    renderTabs(); switchTab(activeTab);
+    startHTTPFallback();
+    connectLive();
+    stampSync();
+  } else {
+    tabData = migrateShapes_v10(await fetchTabs_v10());
+    if(Object.keys(tabData).length===0){ tabData['Click to edit']={ todo:[], inprogress:[], done:[] }; }
+    activeTab = Object.keys(tabData)[0];
+    renderTabs(); switchTab(activeTab);
+    startHTTPFallback();
+    connectLive();
+    stampSync();
+  }
+}
 document.addEventListener('DOMContentLoaded', boot);
 </script>
+
 </body>
 </html>
