@@ -1,5 +1,4 @@
-<!-- Solara v10.2 — smooth sync (UI/UX + full features) | PART 1/2
-Save this as solara.html. Then open PART 2 and append its content to the end of this file. -->
+<!-- Solara v10.2+ — smooth sync (loop fix + reliable workspace load) -->
 <!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
@@ -19,6 +18,8 @@ Save this as solara.html. Then open PART 2 and append its content to the end of 
     .presence-dot{ position:absolute; right:-2px; bottom:-2px; width:10px; height:10px; border-radius:999px; background:#10b981; border:2px solid white }
     .avatar{ position:relative }
     footer .slot{ min-width: 0 }
+    /* Debug panel */
+    #debugPanel{ position:fixed; right:8px; bottom:8px; z-index:99; max-width:380px; display:none }
   </style>
 </head>
 <body class="flex flex-col min-h-screen bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">
@@ -130,7 +131,7 @@ Save this as solara.html. Then open PART 2 and append its content to the end of 
   </footer>
 </div>
 
-<!-- Members Modal (unchanged behavior) -->
+<!-- Members Modal -->
 <div id="membersModal" class="hidden fixed inset-0 z-[60] flex items-center justify-center">
   <div class="absolute inset-0 bg-black/40" onclick="closeMembers()"></div>
   <div class="relative w-full max-w-lg rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-5 shadow-xl">
@@ -148,543 +149,230 @@ Save this as solara.html. Then open PART 2 and append its content to the end of 
   </div>
 </div>
 
-<!-- APP SCRIPT IS IN PART 2. Append the Part 2 contents after this line. -->
-<!-- Solara v10.2 — smooth sync | PART 2/2
-Append everything below to the bottom of PART 1 (same file). Do NOT add another <!DOCTYPE> or <html> tag. -->
+<!-- Debug badge -->
+<div id="debugPanel" class="rounded-lg bg-gray-900/90 text-white p-3 text-xs shadow-xl">
+  <div class="font-semibold mb-1">Debug</div>
+  <div id="debugLog" class="max-h-48 overflow-auto whitespace-pre-wrap leading-5"></div>
+</div>
+
 <script>
 /* ---------------- CONFIG ---------------- */
-const API_BASE = "https://shy-smoke-ab8e.justinbhalla28.workers.dev";
-const apiUrl = p => API_BASE.replace(/\/+$/,'') + '/' + String(p||'').replace(/^\/+/,'');
+const API_BASE = "https://shy-smoke-ab8e.justinbhalla28.workers.dev"; // Worker URL
+const apiUrl = (p)=> API_BASE.replace(/\/+$/,'') + '/' + String(p||'').replace(/^\/+,'');
+
+/* ---------------- SHARED UTILS ---------------- */
+const debounce=(fn,ms=400)=>{let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>fn(...a),ms)}};
+const qs=(s)=>document.querySelector(s);
+function logDebug(msg,...rest){ try{ if(new URL(location.href).searchParams.get('debug')!=='1') return; const box=qs('#debugPanel'); box.style.display='block'; const area=qs('#debugLog'); const line=`${new Date().toLocaleTimeString()} — ${msg} ${rest.length?JSON.stringify(rest):''}`; area.textContent+="\n"+line; area.scrollTop=area.scrollHeight; console.debug('[Solara]',msg,...rest);}catch{} }
+
+/* ---- Loop-safe redirect ---- */
+const REDIRECT_SENT_KEY='solara_redirect_sent';
+function safeRedirectToSignIn(){ try{ const last=Number(localStorage.getItem(REDIRECT_SENT_KEY)||'0'); const now=Date.now(); if(now-last<5000){ logDebug('Skip redirect (cooldown)'); return; } localStorage.setItem(REDIRECT_SENT_KEY,String(now)); location.replace('/sign-in.html'); }catch(e){ location.href='/sign-in.html'; } }
+
+/* ---- Auth token helpers ---- */
+function getSessionJWT(){ const m=document.cookie.match(/(?:^|; )(?:stytch_session_jwt|solara_session_jwt)=([^;]+)/); return m?decodeURIComponent(m[1]):(localStorage.getItem('stytch_session_jwt')||localStorage.getItem('solara_session_jwt')||null); }
+
+/* ---- Unified fetch with auth + cookies ---- */
+async function apiFetch(path, opts={}){
+  const token=getSessionJWT(); const headers=new Headers(opts.headers||{});
+  if(token) headers.set('Authorization', `Bearer ${token}`);
+  if(!headers.has('Content-Type') && (opts.method||'GET').toUpperCase()!=='GET') headers.set('Content-Type','application/json');
+  const res=await fetch(apiUrl(path), { ...opts, headers, credentials:'include', mode:'cors' });
+  if(res.status===401){ logDebug('401 on', path); throw new Error('auth_401'); }
+  if(!res.ok){ const txt=await res.text().catch(()=>''), err=new Error('api_error'); err.status=res.status; err.body=txt; throw err; }
+  const ct=res.headers.get('content-type')||''; return ct.includes('application/json')?res.json():res.text();
+}
 
 /* ---------------- STATE ---------------- */
-let WORKSPACE_ID = '';
-let WORKSPACE_NAME = '';
-let sessionJWT = null;
-let authedUser = null;
-let currentUserKey = null;
-let currentRole = 'viewer';
-
-const COLS = ['todo','inprogress','done'];
-let activeTab = null;
-let tabData = {};
-let ws = null;
-let wsConnected = false;
-
-let presence = new Map(); // others only
-let lastSyncedAt = null;
-
-let presenceBeatTimer = null;
-let presencePollTimer = null;
-let taskPollTimer = null;
-
+let WORKSPACE_ID=''; let WORKSPACE_NAME=''; let sessionJWT=null; let authedUser=null; let currentUserKey=null; let currentRole='viewer';
+const COLS=['todo','inprogress','done']; let activeTab=null; let tabData={}; let ws=null; let wsConnected=false; let presence=new Map(); let lastSyncedAt=null; let presenceBeatTimer=null; let presencePollTimer=null; let taskPollTimer=null;
 // Smooth-sync flags
-let isEditing = false;
-let isDragging = false;
-let editingTasks = new Set();
-let hasRemoteDuringEdit = false;
-
-/* ---------------- UTIL ---------------- */
-const debounce = (fn, ms=400)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; };
-function getSessionJWT(){
-  const m = document.cookie.match(/(?:^|; )(?:stytch_session_jwt|solara_session_jwt)=([^;]+)/);
-  return m ? decodeURIComponent(m[1]) : (localStorage.getItem('stytch_session_jwt') || localStorage.getItem('solara_session_jwt') || null);
-}
-function initials(name,email){ const parts=(name||'').trim().split(/\s+/).filter(Boolean); return parts.length?parts.slice(0,2).map(s=>s[0]).join('').toUpperCase():(email||'?').slice(0,2).toUpperCase(); }
-function normalizeDateString(v){ if(!v) return ''; if(/^\d{4}-\d{2}-\d{2}$/.test(v)) return v; const d=new Date(v); if(isNaN(d)) return ''; const tz=d.getTimezoneOffset()*60000; return new Date(d.getTime()-tz).toISOString().slice(0,10); }
-function stampSync(){ lastSyncedAt = new Date(); const el=document.getElementById('lastSynced'); if(el) el.textContent = 'Last synced: ' + lastSyncedAt.toLocaleTimeString(); }
-
-// Robust fetch with credentials + bearer fallback
-async function apiFetch(path, opts={}){
-  const headers = Object.assign({'Content-Type':'application/json'}, opts.headers||{});
-  const token = sessionJWT || getSessionJWT();
-  if(token) headers['Authorization'] = `Bearer ${token}`;
-  const res = await fetch(apiUrl(path), {
-    ...opts,
-    headers,
-    credentials: 'include', // allow cookie session if present
-    mode: 'cors'
-  });
-  return res;
-}
+let isEditing=false; let isDragging=false; let editingTasks=new Set(); let hasRemoteDuringEdit=false;
 
 /* ---------------- AUTH ---------------- */
 function displayNameFor(u){ const f=u?.name?.first_name, l=u?.name?.last_name, e=u?.email_addresses?.[0]?.email_address; return [f,l].filter(Boolean).join(' ') || e || 'User'; }
-function updateAuthUI(){
-  const name=displayNameFor(authedUser);
-  const email=authedUser?.email_addresses?.[0]?.email_address||'';
-  const av=document.getElementById('avatar'); if(av) av.textContent = initials(name,email);
-  const un=document.getElementById('userName'); if(un) un.textContent = name;
-  const ue=document.getElementById('userEmail'); if(ue) ue.textContent = email;
-}
-function safeRedirectToSignIn(){
-  // prevent loops: only redirect if we're not already on sign-in
-  const here = location.pathname.toLowerCase();
-  if(here.includes('/sign-in')) return;
-  // clear stale tokens then redirect
-  try{ localStorage.removeItem('stytch_session_jwt'); localStorage.removeItem('solara_session_jwt'); }catch{}
-  location.replace('/sign-in.html');
-}
-async function verifySessionAndHydrate(){
-  sessionJWT = getSessionJWT();
-  if(!sessionJWT){ return false; }
-  try{
-    const r = await apiFetch('auth/check', { method:'GET' });
-    if(!r.ok){ return false; }
-    const data = await r.json();
-    currentUserKey = data.user_id;
-    const email = data.email ? [{ email_address: data.email }] : [];
-    const parts = (data.name||'').split(/\s+/);
-    authedUser = { name:{ first_name:parts[0]||'', last_name:parts.slice(1).join(' ')||'' }, email_addresses: email };
-    try{ localStorage.setItem('stytch_user', JSON.stringify(authedUser)); }catch{}
-    updateAuthUI();
-    return true;
-  }catch{
-    return false;
-  }
+function updateAuthUI(){ const name=displayNameFor(authedUser); const email=authedUser?.email_addresses?.[0]?.email_address||''; qs('#avatar').textContent = (name?name[0]:'?').toUpperCase(); qs('#userName').textContent=name; qs('#userEmail').textContent=email; }
+async function verifySessionAndHydrate(){ sessionJWT=getSessionJWT(); if(!sessionJWT){ logDebug('No session JWT'); safeRedirectToSignIn(); return false; }
+  try{ const data=await apiFetch('auth/check'); currentUserKey=data.user_id; const email=data.email?[{email_address:data.email}]:[]; const parts=(data.name||'').split(/\s+/); authedUser={ name:{first_name:parts[0]||'', last_name:parts.slice(1).join(' ')||''}, email_addresses:email }; localStorage.setItem('stytch_user', JSON.stringify(authedUser)); updateAuthUI(); return true; }catch(e){ logDebug('auth.check failed',e?.message||e); safeRedirectToSignIn(); return false; }
 }
 
 /* ---------------- MEMBERS / SHARES ---------------- */
-async function fetchRole(){ const r=await apiFetch(`workspaces/${encodeURIComponent(WORKSPACE_ID)}/role`); if(!r.ok) return 'viewer'; const j=await r.json().catch(()=>({})); return j.role||'viewer'; }
-async function listShares(){ const r=await apiFetch(`shares?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`); if(!r.ok) return []; const j=await r.json().catch(()=>({shares:[]})); return j.shares||[]; }
-async function invite(email){ return apiFetch('shares', { method:'POST', body: JSON.stringify({ workspace_id: WORKSPACE_ID, email }) }); }
-async function patchShareRole(id, role){ return apiFetch(`shares/${id}`, { method:'PATCH', body: JSON.stringify({ role }) }); }
-async function removeShare(id){ return apiFetch(`shares/${id}`, { method:'DELETE' }); }
-async function transferOwner(toEmail){ return apiFetch(`workspaces/${encodeURIComponent(WORKSPACE_ID)}/transfer_owner`, { method:'POST', body: JSON.stringify({ to_email: toEmail }) }); }
+async function fetchRole(){ try{ const j=await apiFetch(`workspaces/${encodeURIComponent(WORKSPACE_ID)}/role`); return j.role||'viewer'; }catch(e){ logDebug('role fetch failed',e?.status); return 'viewer'; } }
+async function listShares(){ try{ const j=await apiFetch(`shares?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`); return j.shares||[]; }catch{ return []; } }
+async function invite(email){ return apiFetch('shares',{ method:'POST', body: JSON.stringify({ workspace_id:WORKSPACE_ID, email })}); }
+async function patchShareRole(id,role){ return apiFetch(`shares/${id}`,{ method:'PATCH', body: JSON.stringify({ role })}); }
+async function removeShare(id){ return apiFetch(`shares/${id}`,{ method:'DELETE' }); }
+async function transferOwner(toEmail){ return apiFetch(`workspaces/${encodeURIComponent(WORKSPACE_ID)}/transfer_owner`,{ method:'POST', body: JSON.stringify({ to_email: toEmail })}); }
 
 /* ---------------- TABS LOAD/SAVE ---------------- */
-async function fetchTabs(){ const r=await apiFetch(`tasks?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`); if(!r.ok) return {}; const j=await r.json().catch(()=>({tabs:{}})); return j.tabs||{}; }
-async function saveTabsHTTP(tabs){ await apiFetch('tasks', { method:'POST', body: JSON.stringify({ workspace_id: WORKSPACE_ID, tabs }) }).catch(()=>{}); }
+async function fetchTabs(){ try{ const j=await apiFetch(`tasks?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`); return j.tabs||{}; }catch(e){ logDebug('tasks fetch failed',e?.status); return {}; } }
+async function saveTabsHTTP(tabs){ try{ await apiFetch('tasks',{ method:'POST', body: JSON.stringify({ workspace_id:WORKSPACE_ID, tabs })}); }catch(e){ logDebug('tasks save failed', e?.status); } }
 
 /* ---------------- PRESENCE HTTP ---------------- */
-async function presenceBeatHTTP(){ try{ await apiFetch('presence/beat', { method:'POST', body: JSON.stringify({ workspace_id: WORKSPACE_ID }) }); }catch{} }
-async function presencePollHTTP(){
-  try{
-    const r = await apiFetch(`presence?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`);
-    if(!r.ok) return;
-    const j = await r.json().catch(()=>({online:[]}));
-    const mine = currentUserKey;
-    presence.clear();
-    (j.online||[]).forEach(p=>{ if(p.id!==mine) presence.set(p.id, { name:p.name, email:p.email }); });
-    renderPresence();
-  }catch{}
-}
+async function presenceBeatHTTP(){ try{ await apiFetch('presence/beat',{ method:'POST', body: JSON.stringify({ workspace_id:WORKSPACE_ID })}); }catch(e){ logDebug('beat failed', e?.status); } }
+async function presencePollHTTP(){ try{ const j=await apiFetch(`presence?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`); const mine=currentUserKey; presence.clear(); (j.online||[]).forEach(p=>{ if(p.id!==mine) presence.set(p.id,{name:p.name,email:p.email});}); renderPresence(); }catch(e){ logDebug('presence poll failed', e?.status); } }
 
 /* ---------------- LIVE WS ---------------- */
-function liveUrl(){ try{ const u=new URL(API_BASE); u.pathname=(u.pathname.replace(/\/+$/,'')+'/live').replace(/\/{2,}/g,'/'); u.search=`?ws=${encodeURIComponent(WORKSPACE_ID)}&token=${encodeURIComponent(sessionJWT||'')}`; u.protocol=u.protocol.replace('http','ws'); return u.toString(); }catch{ return null; } }
-function connectLive(){
-  const url = liveUrl(); if(!url) { startHTTPFallback(); return; }
-  try { ws = new WebSocket(url); } catch { startHTTPFallback(); return; }
-
-  ws.onopen = ()=>{ wsConnected = true; stopTaskPolling(); };
-  ws.onclose = ()=>{ wsConnected = false; startHTTPFallback(); };
-  ws.onerror = ()=>{ wsConnected = false; startHTTPFallback(); };
-  ws.onmessage = (ev)=>{
-    let msg = {}; try{ msg=JSON.parse(ev.data||'{}'); }catch{}
+function liveUrl(){ try{ const u=new URL(API_BASE); u.pathname=(u.pathname.replace(/\/+$/,'')+'/live').replace(/\/ {2,}/g,'/'); u.search=`?ws=${encodeURIComponent(WORKSPACE_ID)}&token=${encodeURIComponent(getSessionJWT()||'')}`; u.protocol=u.protocol.replace('http','ws'); return u.toString(); }catch{ return null; } }
+function connectLive(){ const url=liveUrl(); if(!url){ startHTTPFallback(); return; } try{ ws=new WebSocket(url);}catch{ startHTTPFallback(); return; }
+  ws.onopen=()=>{ wsConnected=true; stopTaskPolling(); logDebug('WS open'); };
+  ws.onclose=()=>{ wsConnected=false; startHTTPFallback(); logDebug('WS closed'); };
+  ws.onerror=()=>{ wsConnected=false; startHTTPFallback(); logDebug('WS error'); };
+  ws.onmessage=(ev)=>{ let msg={}; try{ msg=JSON.parse(ev.data||'{}'); }catch{}
     if(msg.type==='hello'){
-      currentUserKey = msg.you?.user_id || currentUserKey;
-      presence.clear(); (msg.online||[]).forEach(p=> presence.set(p.id, { name:p.name, email:p.email })); renderPresence();
-      mergeRemoteTabs(msg.tabs||{}, /*by*/ msg.by); // initial merge
-      if(!activeTab) activeTab = Object.keys(tabData)[0];
-      renderTabs(); switchTab(activeTab); stampSync(); return;
-    }
-    if(msg.type==='tabs:set' && msg.ws===WORKSPACE_ID){
-      const fromSelf = !!msg.by && msg.by === currentUserKey;
-      const changed = mergeRemoteTabs(msg.tabs||{}, msg.by);
-      if (!isEditing && !isDragging && (!fromSelf || changed)) {
-        if(!tabData[activeTab]) activeTab = Object.keys(tabData)[0]||null;
-        renderTabs(); switchTab(activeTab); stampSync();
-      } else {
-        hasRemoteDuringEdit = true; // apply later to DOM
-      }
-      return;
-    }
-    if(msg.type==='presence/join'){ if(msg.by && msg.by!==currentUserKey){ presence.set(msg.by, { name:msg.name||'', email:msg.email||'' }); renderPresence(); } return; }
+      currentUserKey = msg.you?.user_id || currentUserKey; presence.clear(); (msg.online||[]).forEach(p=> presence.set(p.id,{name:p.name,email:p.email})); renderPresence();
+      mergeRemoteTabs(msg.tabs||{}, msg.by); if(!activeTab) activeTab=Object.keys(tabData)[0]; renderTabs(); switchTab(activeTab); stampSync(); return; }
+    if(msg.type==='tabs:set'&& msg.ws===WORKSPACE_ID){ const fromSelf=!!msg.by && msg.by===currentUserKey; const changed=mergeRemoteTabs(msg.tabs||{}, msg.by); if(!isEditing && !isDragging && (!fromSelf || changed)){ if(!tabData[activeTab]) activeTab=Object.keys(tabData)[0]||null; renderTabs(); switchTab(activeTab); stampSync(); } else { hasRemoteDuringEdit=true; } return; }
+    if(msg.type==='presence/join'){ if(msg.by && msg.by!==currentUserKey){ presence.set(msg.by,{name:msg.name||'',email:msg.email||''}); renderPresence(); } return; }
     if(msg.type==='presence/leave'){ presence.delete(msg.by); renderPresence(); return; }
   };
 }
 function liveSend(obj){ if(ws && ws.readyState===1){ try{ ws.send(JSON.stringify({ ...obj, ws: WORKSPACE_ID })); }catch{} } }
 
 /* ---------------- PRESENCE UI ---------------- */
-function renderPresence(){
-  const avatars=document.getElementById('presenceAvatars');
-  const list=document.getElementById('presenceList');
-  const count=document.getElementById('presenceCount');
-  if(!avatars||!list||!count) return;
-  avatars.innerHTML=''; list.innerHTML='';
-
-  const others = [...presence.entries()].map(([id,v])=>({id,...v})).sort((a,b)=>(a.name||a.email).localeCompare(b.name||b.email));
-  count.textContent = others.length ? '' : '0 online';
-
-  const max=4;
-  others.slice(0,max).forEach(p=>{
-    const span=document.createElement('span');
-    span.className='avatar inline-flex items-center justify-center h-7 w-7 rounded-full bg-indigo-600/10 text-indigo-700 dark:text-indigo-300 text-[11px] font-semibold ring-2 ring-white';
-    span.title=p.name||p.email; span.textContent=initials(p.name,p.email);
-    const dot=document.createElement('span'); dot.className='presence-dot'; span.appendChild(dot);
-    avatars.appendChild(span);
-
-    const row=document.createElement('div');
-    row.className='flex items-center gap-2';
-    row.innerHTML=`<div class="relative inline-flex items-center justify-center h-6 w-6 rounded-full bg-indigo-600/10 text-indigo-700 dark:text-indigo-300 text-[10px] font-semibold">
-      ${initials(p.name,p.email)}<span class="presence-dot" style="right:-1px;bottom:-1px;width:8px;height:8px"></span></div>
-      <div class="truncate">${p.name||p.email}</div>`;
-    list.appendChild(row);
-  });
-  if(others.length>max){
-    const extra=others.length-max;
-    const more=document.createElement('span');
-    more.className='avatar inline-flex items-center justify-center h-7 w-7 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[11px] font-semibold ring-2 ring-white';
-    more.textContent = `+${extra}`; avatars.appendChild(more);
-  }
-}
-const presenceBtn=document.getElementById('presenceBtn');
-if(presenceBtn){ presenceBtn.onclick = ()=>{ const t=document.getElementById('presenceTooltip'); if(t) t.classList.toggle('hidden'); }; }
+function initials(name,email){ const parts=(name||'').trim().split(/\s+/).filter(Boolean); return parts.length?parts.slice(0,2).map(s=>s[0]).join('').toUpperCase():(email||'?').slice(0,2).toUpperCase(); }
+function renderPresence(){ const avatars=qs('#presenceAvatars'); const list=qs('#presenceList'); const count=qs('#presenceCount'); avatars.innerHTML=''; list.innerHTML=''; const others=[...presence.entries()].map(([id,v])=>({id,...v})).sort((a,b)=>(a.name||a.email).localeCompare(b.name||b.email)); count.textContent=others.length?'':'0 online'; const max=4; others.slice(0,max).forEach(p=>{ const span=document.createElement('span'); span.className='avatar inline-flex items-center justify-center h-7 w-7 rounded-full bg-indigo-600/10 text-indigo-700 dark:text-indigo-300 text-[11px] font-semibold ring-2 ring-white'; span.title=p.name||p.email; span.textContent=initials(p.name,p.email); const dot=document.createElement('span'); dot.className='presence-dot'; span.appendChild(dot); avatars.appendChild(span); const row=document.createElement('div'); row.className='flex items-center gap-2'; row.innerHTML=`<div class="relative inline-flex items-center justify-center h-6 w-6 rounded-full bg-indigo-600/10 text-indigo-700 dark:text-indigo-300 text-[10px] font-semibold">${initials(p.name,p.email)}<span class="presence-dot" style="right:-1px;bottom:-1px;width:8px;height:8px"></span></div><div class="truncate">${p.name||p.email}</div>`; list.appendChild(row); }); if(others.length>max){ const extra=others.length-max; const more=document.createElement('span'); more.className='avatar inline-flex items-center justify-center h-7 w-7 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-[11px] font-semibold ring-2 ring-white'; more.textContent = `+${extra}`; avatars.appendChild(more); } }
+qs('#presenceBtn').onclick=()=> qs('#presenceTooltip').classList.toggle('hidden');
 
 /* ---------------- MERGE (preserve edits) ---------------- */
-function mergeRemoteTabs(remote, by){
-  const prevJSON = JSON.stringify(tabData);
-  const local = tabData;
-  const editingIds = new Set(editingTasks);
-  tabData = JSON.parse(JSON.stringify(remote||{}));
-  if (editingIds.size){
-    for (const tabName of Object.keys(tabData)) {
-      for (const col of COLS) {
-        const list = tabData[tabName][col] || [];
-        for (let i=0;i<list.length;i++){
-          const t = list[i];
-          if (editingIds.has(t.id)){
-            const lt = findTask(local, t.id);
-            if (lt){ list[i] = { ...t, content: lt.content, dueDate: lt.dueDate, priority: lt.priority, pos: lt.pos, upd: lt.upd, by: lt.by }; }
-          }
-        }
-      }
-    }
-  }
-  return JSON.stringify(tabData) !== prevJSON;
-}
-function findTask(data, id){
-  for (const tab of Object.keys(data||{})){
-    for (const c of COLS){
-      const hit = (data[tab][c]||[]).find(x=>x.id===id);
-      if (hit) return hit;
-    }
-  }
-  return null;
-}
+function mergeRemoteTabs(remote){ const prevJSON=JSON.stringify(tabData); const local=tabData; const editingIds=new Set(editingTasks); tabData=JSON.parse(JSON.stringify(remote||{})); if(editingIds.size){ for(const tabName of Object.keys(tabData)){ for(const col of COLS){ const list=tabData[tabName][col]||[]; for(let i=0;i<list.length;i++){ const t=list[i]; if(editingIds.has(t.id)){ const lt=findTask(local,t.id); if(lt){ list[i]={...t, content:lt.content, dueDate:lt.dueDate, priority:lt.priority, pos:lt.pos, upd:lt.upd, by:lt.by}; } } } } } } return JSON.stringify(tabData)!==prevJSON; }
+function findTask(data,id){ for(const tab of Object.keys(data||{})){ for(const c of COLS){ const hit=(data[tab][c]||[]).find(x=>x.id===id); if(hit) return hit; } } return null; }
 
 /* ---------------- SHAPE / RENDER ---------------- */
-function migrateShapes(data){
-  const out=JSON.parse(JSON.stringify(data||{}));
-  Object.keys(out).forEach(tab=>{
-    COLS.forEach(col=>{
-      let pos=1;
-      out[tab][col]=(out[tab][col]||[]).map(t=>({
-        id: t.id||`task-${cryptoRandom()}`,
-        content: typeof t.content==='string'?t.content:'',
-        dueDate: normalizeDateString(t.dueDate),
-        priority: ['High','Medium','Low'].includes(t.priority)?t.priority:'Medium',
-        pos: Number.isFinite(+t.pos)?+t.pos:pos++,
-        upd: Number.isFinite(+t.upd)?+t.upd:Date.now(),
-        by: t.by||currentUserKey||'unknown'
-      }));
-    });
-  });
-  return out;
-}
+function normalizeDateString(v){ if(!v) return ''; if(/^\d{4}-\d{2}-\d{2}$/.test(v)) return v; const d=new Date(v); if(isNaN(d)) return ''; const tz=d.getTimezoneOffset()*60000; return new Date(d.getTime()-tz).toISOString().slice(0,10); }
+function migrateShapes(data){ const out=JSON.parse(JSON.stringify(data||{})); Object.keys(out).forEach(tab=>{ COLS.forEach(col=>{ let pos=1; out[tab][col]=(out[tab][col]||[]).map(t=>({ id:t.id||`task-${cryptoRandom()}`, content:typeof t.content==='string'?t.content:'', dueDate:normalizeDateString(t.dueDate), priority:['High','Medium','Low'].includes(t.priority)?t.priority:'Medium', pos:Number.isFinite(+t.pos)?+t.pos:pos++, upd:Number.isFinite(+t.upd)?+t.upd:Date.now(), by:t.by||currentUserKey||'unknown' })); }); }); return out; }
 function cryptoRandom(){ try{ return crypto.randomUUID(); }catch{ return Math.random().toString(36).slice(2); } }
 
-function renderTabs(){
-  const node=document.getElementById('tabs'); if(!node) return; node.innerHTML='';
-  const names=Object.keys(tabData);
-  names.forEach(name=>{
-    const b=document.createElement('button');
-    b.className='tab-button px-4 py-1.5 rounded-full text-sm font-medium bg-transparent border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:border-indigo-500 hover:text-indigo-600 dark:hover:text-white transition-all duration-150 truncate max-w-[160px]';
-    if(name===activeTab){ b.classList.add('border-indigo-500','text-indigo-700','dark:text-white','font-semibold','bg-indigo-50','dark:bg-indigo-600/30'); }
-    b.dataset.tab=name; b.textContent=name;
-    b.onclick=()=>{ switchTab(name); };
-    b.ondblclick=()=>{ if(currentRole==='viewer') return; const nn=prompt('Rename tab:',name); if(!nn||!nn.trim()||nn===name||tabData[nn])return; tabData[nn]=tabData[name]; delete tabData[name]; if(activeTab===name) activeTab=nn; renderTabs(); switchTab(activeTab); pushTabs(); };
-    b.oncontextmenu=(e)=>{ e.preventDefault(); if(currentRole==='viewer')return; if(confirm(`Delete tab "${name}"?`)){ delete tabData[name]; if(activeTab===name) activeTab=Object.keys(tabData)[0]||null; renderTabs(); renderBoard(); pushTabs(); } };
-    node.appendChild(b);
-  });
-}
+function renderTabs(){ const node=qs('#tabs'); node.innerHTML=''; const names=Object.keys(tabData); names.forEach(name=>{ const b=document.createElement('button'); b.className='tab-button px-4 py-1.5 rounded-full text-sm font-medium bg-transparent border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:border-indigo-500 hover:text-indigo-600 dark:hover:text-white transition-all duration-150 truncate max-w-[160px]'; if(name===activeTab){ b.classList.add('border-indigo-500','text-indigo-700','dark:text-white','font-semibold','bg-indigo-50','dark:bg-indigo-600/30'); } b.dataset.tab=name; b.textContent=name; b.onclick=()=>{ switchTab(name); }; b.ondblclick=()=>{ if(currentRole==='viewer') return; const nn=prompt('Rename tab:',name); if(!nn||!nn.trim()||nn===name||tabData[nn])return; tabData[nn]=tabData[name]; delete tabData[name]; if(activeTab===name) activeTab=nn; renderTabs(); switchTab(activeTab); pushTabs(); }; b.oncontextmenu=(e)=>{ e.preventDefault(); if(currentRole==='viewer')return; if(confirm(`Delete tab "${name}"?`)){ delete tabData[name]; if(activeTab===name) activeTab=Object.keys(tabData)[0]||null; renderTabs(); renderBoard(); pushTabs(); } }; node.appendChild(b); }); }
 function switchTab(tab){ if(!tabData[tab]) return; activeTab=tab; document.querySelectorAll('.tab-button').forEach(x=>x.classList.remove('border-indigo-500','text-indigo-700','dark:text-white','font-semibold','bg-indigo-50','dark:bg-indigo-600/30')); const btn=[...document.querySelectorAll('.tab-button')].find(b=>b.dataset.tab===tab); if(btn) btn.classList.add('border-indigo-500','text-indigo-700','dark:text-white','font-semibold','bg-indigo-50','dark:bg-indigo-600/30'); renderBoard(); }
 function ensureAtLeastOne(){ const cols=tabData[activeTab]; if(!cols) return; if((cols.todo?.length||0)+(cols.inprogress?.length||0)+(cols.done?.length||0)===0){ const id=`task-${cryptoRandom()}`; cols.todo.push({ id, content:'', dueDate:'', priority:'Medium', pos:1, upd:Date.now(), by: currentUserKey }); } }
 
-function createTaskElement(id, content='', dueDate='', priority='Medium', column, pos){
-  const w=document.createElement('div');
-  w.id=id; w.setAttribute('data-task','1'); w.draggable=currentRole!=='viewer';
-  w.className='relative p-3 rounded bg-white dark:bg-gray-700 shadow cursor-move mb-2'; w.setAttribute('data-column',column);
-
-  const editable=document.createElement('div'); editable.className='editable w-full font-medium mb-1'; editable.contentEditable=(currentRole!=='viewer'); editable.innerText=content;
-  const placeholder=document.createElement('span'); placeholder.className='absolute left-3 top-3 text-sm text-gray-400 pointer-events-none'; placeholder.textContent='Click to edit...';
-  function toggle(){ placeholder.style.display = editable.innerText.trim()===''?'block':'none'; }
-
+function createTaskElement(id, content='', dueDate='', priority='Medium', column, pos){ const w=document.createElement('div'); w.id=id; w.setAttribute('data-task','1'); w.draggable=currentRole!=='viewer'; w.className='relative p-3 rounded bg-white dark:bg-gray-700 shadow cursor-move mb-2'; w.setAttribute('data-column',column);
+  const editable=document.createElement('div'); editable.className='editable w-full font-medium mb-1'; editable.contentEditable=(currentRole!=='viewer'); editable.innerText=content; const placeholder=document.createElement('span'); placeholder.className='absolute left-3 top-3 text-sm text-gray-400 pointer-events-none'; placeholder.textContent='Click to edit...'; function toggle(){ placeholder.style.display = editable.innerText.trim()===''?'block':'none'; }
   const row=document.createElement('div'); row.className='flex items-center gap-2';
   const dateInput=document.createElement('input'); dateInput.type='date'; dateInput.value=normalizeDateString(dueDate)||''; dateInput.disabled=(currentRole==='viewer'); dateInput.className='mt-1 text-xs bg-transparent text-gray-700 dark:text-gray-200 border border-transparent rounded px-1 date-badge';
-  const prioritySelect=document.createElement('select'); prioritySelect.disabled=(currentRole==='viewer'); prioritySelect.className='mt-1 ml-2 text-xs bg-transparent text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-gray-600 rounded px-1';
-  ['High','Medium','Low'].forEach(level=>{ const o=document.createElement('option'); o.value=level; o.text=level; if(level===priority) o.selected=true; prioritySelect.appendChild(o); });
+  const prioritySelect=document.createElement('select'); prioritySelect.disabled=(currentRole==='viewer'); prioritySelect.className='mt-1 ml-2 text-xs bg-transparent text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-gray-600 rounded px-1'; ['High','Medium','Low'].forEach(level=>{ const o=document.createElement('option'); o.value=level; o.text=level; if(level===priority) o.selected=true; prioritySelect.appendChild(o); });
   const del=document.createElement('button'); del.className='absolute top-2 right-2 text-gray-400 hover:text-red-500'; del.innerHTML='<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>'; del.title='Delete Task'; del.onclick=()=>{ if(currentRole==='viewer')return; if(confirm('Delete this task?')) removeTaskById(id); };
-
-  // Smooth typing: mark editing while focused
+  // editing flags
   editable.addEventListener('focus', ()=>{ isEditing=true; editingTasks.add(id); });
   editable.addEventListener('blur', ()=>{ editingTasks.delete(id); if(editingTasks.size===0){ isEditing=false; if(hasRemoteDuringEdit){ hasRemoteDuringEdit=false; renderTabs(); switchTab(activeTab); stampSync(); } } });
   editable.addEventListener('input', ()=>{ toggle(); persistTaskEdits(id,{ content: editable.innerText.trim() }); });
-
   dateInput.addEventListener('focus', ()=>{ isEditing=true; editingTasks.add(id); });
   dateInput.addEventListener('blur', ()=>{ editingTasks.delete(id); if(editingTasks.size===0){ isEditing=false; if(hasRemoteDuringEdit){ hasRemoteDuringEdit=false; renderTabs(); switchTab(activeTab); stampSync(); } } });
   dateInput.addEventListener('change', ()=> persistTaskEdits(id,{ dueDate: normalizeDateString(dateInput.value) }));
-
   prioritySelect.addEventListener('focus', ()=>{ isEditing=true; editingTasks.add(id); });
   prioritySelect.addEventListener('blur', ()=>{ editingTasks.delete(id); if(editingTasks.size===0){ isEditing=false; if(hasRemoteDuringEdit){ hasRemoteDuringEdit=false; renderTabs(); switchTab(activeTab); stampSync(); } } });
   prioritySelect.addEventListener('change', ()=> persistTaskEdits(id,{ priority: prioritySelect.value||'Medium' }));
-
   w.addEventListener('dragstart',e=>{ if(currentRole==='viewer'){ e.preventDefault(); return; } isDragging=true; w.classList.add('dragging'); e.dataTransfer.setData('text/plain',id); dragContext.id=id; dragContext.fromCol=w.getAttribute('data-column'); });
   w.addEventListener('dragend',()=>{ isDragging=false; w.classList.remove('dragging'); if(hasRemoteDuringEdit){ hasRemoteDuringEdit=false; renderTabs(); switchTab(activeTab); stampSync(); } });
+  row.appendChild(dateInput); row.appendChild(prioritySelect); w.appendChild(editable); w.appendChild(placeholder); w.appendChild(row); w.appendChild(del); toggle(); return w; }
 
-  row.appendChild(dateInput); row.appendChild(prioritySelect);
-  w.appendChild(editable); w.appendChild(placeholder); w.appendChild(row); w.appendChild(del);
-  toggle();
-  return w;
-}
-
-const dragContext = { id:null, fromCol:null, overCol:null, insertIndex:null };
+const dragContext={ id:null, fromCol:null, overCol:null, insertIndex:null };
 function clearDrag(){ dragContext.id=null; dragContext.fromCol=null; dragContext.overCol=null; dragContext.insertIndex=null; }
-function getAfter(container, y){
-  const els=[...container.querySelectorAll('[data-task]:not(.dragging)')];
-  return els.reduce((closest,child)=>{ const box=child.getBoundingClientRect(); const off=y-box.top-box.height/2; if(off<0 && off>closest.offset){ return {offset:off, element:child}; } else return closest; },{offset:-Infinity}).element;
-}
-function computeInsertIndex(colEl, indicator){
-  const siblings=[...colEl.querySelectorAll('[data-task]')];
-  if(siblings.length===0) return 0;
-  const all=[...colEl.children]; let index=0;
-  for(let i=0;i<all.length;i++){ const el=all[i]; if(el===indicator){ index=[...all.slice(0,i)].filter(n=>n.hasAttribute && n.hasAttribute('data-task')).length; return index; } }
-  return siblings.length;
-}
-function newPosBetween(prev, next){ const A=Number.isFinite(prev)?+prev:0; const B=Number.isFinite(next)?+next:A+2; if(B-A>1e-6) return A+(B-A)/2; return A+0.000001; }
+function getAfter(container,y){ const els=[...container.querySelectorAll('[data-task]:not(.dragging)')]; return els.reduce((closest,child)=>{ const box=child.getBoundingClientRect(); const off=y-box.top-box.height/2; if(off<0 && off>closest.offset){ return {offset:off, element:child}; } else return closest; },{offset:-Infinity}).element; }
+function computeInsertIndex(colEl,indicator){ const siblings=[...colEl.querySelectorAll('[data-task]')]; if(siblings.length===0) return 0; const all=[...colEl.children]; let index=0; for(let i=0;i<all.length;i++){ const el=all[i]; if(el===indicator){ index=[...all.slice(0,i)].filter(n=>n.hasAttribute && n.hasAttribute('data-task')).length; return index; } } return siblings.length; }
+function newPosBetween(prev,next){ const A=Number.isFinite(prev)?+prev:0; const B=Number.isFinite(next)?+next:A+2; if(B-A>1e-6) return A+(B-A)/2; return A+0.000001; }
 function reindex(list){ list.forEach((t,i)=> t.pos=i+1); }
 
-function renderBoard(){
-  const columns = COLS;
-  columns.forEach(col=>{
-    const colEl=document.getElementById(col);
-    if(!colEl) return;
-    colEl.querySelectorAll('[data-task]')?.forEach(n=>n.remove());
-
-    colEl.ondragover = (e)=>{
-      e.preventDefault();
-      colEl.classList.add('drag-over','show-drop');
-      const after=getAfter(colEl, e.clientY);
-      const indicator=colEl.querySelector('.drop-indicator');
-      if(after==null){ colEl.appendChild(indicator); } else { colEl.insertBefore(indicator, after); }
-      dragContext.overCol = colEl.dataset.col;
-      dragContext.insertIndex = computeInsertIndex(colEl, indicator);
-    };
-    colEl.ondragleave = ()=>{ colEl.classList.remove('drag-over','show-drop'); };
-    colEl.ondrop = (e)=>{
-      e.preventDefault();
-      colEl.classList.remove('drag-over','show-drop');
-      const id=dragContext.id; if(!id) return;
-      commitReorder(id, dragContext.fromCol, colEl.dataset.col, dragContext.insertIndex);
-      clearDrag();
-    };
-  });
-
-  if(!activeTab || !tabData[activeTab]) return;
-  ensureAtLeastOne();
-  const data=tabData[activeTab];
-  COLS.forEach(col=>{
-    const colEl=document.getElementById(col);
-    if(!colEl) return;
-    (data[col]||[]).sort((a,b)=> (a.pos||0)-(b.pos||0)).forEach(t=> colEl.appendChild(createTaskElement(t.id,t.content,t.dueDate,t.priority,col,t.pos)));
-  });
-}
+function renderBoard(){ COLS.forEach(col=>{ const colEl=document.getElementById(col); colEl.querySelectorAll('[data-task]')?.forEach(n=>n.remove()); colEl.ondragover=(e)=>{ e.preventDefault(); colEl.classList.add('drag-over','show-drop'); const after=getAfter(colEl, e.clientY); const indicator=colEl.querySelector('.drop-indicator'); if(after==null){ colEl.appendChild(indicator); } else { colEl.insertBefore(indicator, after); } dragContext.overCol=colEl.dataset.col; dragContext.insertIndex=computeInsertIndex(colEl, indicator); }; colEl.ondragleave=()=>{ colEl.classList.remove('drag-over','show-drop'); }; colEl.ondrop=(e)=>{ e.preventDefault(); colEl.classList.remove('drag-over','show-drop'); const id=dragContext.id; if(!id) return; commitReorder(id, dragContext.fromCol, colEl.dataset.col, dragContext.insertIndex); clearDrag(); };
+    if(!activeTab || !tabData[activeTab]) return; const data=tabData[activeTab]; (data[col]||[]).sort((a,b)=>(a.pos||0)-(b.pos||0)).forEach(t=> colEl.appendChild(createTaskElement(t.id,t.content,t.dueDate,t.priority,col,t.pos))); }); ensureAtLeastOne(); }
 
 /* ---------------- Mutations -> Live push ---------------- */
-function persistTaskEdits(taskId, patch){
-  if(!activeTab || !tabData[activeTab]) return;
-  const cols=COLS;
-  for(const col of cols){
-    const list=tabData[activeTab][col]||[];
-    const idx=list.findIndex(t=>t.id===taskId);
-    if(idx!==-1){
-      if('dueDate' in patch) patch.dueDate = normalizeDateString(patch.dueDate);
-      list[idx] = { ...list[idx], ...patch, upd: Date.now(), by: currentUserKey };
-      break;
-    }
-  }
-  pushTabs();
-}
-function removeTaskById(taskId){
-  if(!activeTab || !tabData[activeTab]) return;
-  for(const col of COLS){
-    const list=tabData[activeTab][col]||[];
-    const idx=list.findIndex(t=>t.id===taskId);
-    if(idx!==-1){ list.splice(idx,1); break; }
-  }
-  renderBoard(); pushTabs();
-}
-function clearAllTasks(){
-  if(currentRole==='viewer') return;
-  if(!activeTab) return;
-  if(!confirm('Clear all tasks in this tab?')) return;
-  tabData[activeTab] = { todo:[], inprogress:[], done:[] };
-  renderBoard(); pushTabs();
-}
-function addNewTask(){
-  if(currentRole==='viewer') return;
-  if(!activeTab){ const def='Click to edit'; if(!tabData[def]) tabData[def]={ todo:[], inprogress:[], done:[] }; activeTab=def; renderTabs(); }
-  const id=`task-${cryptoRandom()}`; const now=Date.now();
-  const t={ id, content:'', dueDate:'', priority:'Medium', pos:(tabData[activeTab].todo.slice(-1)[0]?.pos||0)+1, upd:now, by:currentUserKey };
-  tabData[activeTab].todo.push(t); renderBoard(); pushTabs();
-  const el = document.getElementById(id)?.querySelector('.editable'); if (el){ el.focus(); }
-}
-function commitReorder(taskId, fromCol, toCol, insertIndex){
-  if(currentRole==='viewer') return;
-  const cols=tabData[activeTab];
-  let moved; const fromList=cols[fromCol]||[]; const i=fromList.findIndex(t=>t.id===taskId);
-  if(i!==-1){ moved=fromList.splice(i,1)[0]; }
-  if(!moved) return;
-  const target=cols[toCol]=cols[toCol]||[];
-  if(insertIndex==null||insertIndex<0) insertIndex=target.length;
-  if(insertIndex>target.length) insertIndex=target.length;
-  const prev=target[insertIndex-1]?.pos, next=target[insertIndex]?.pos;
-  moved.pos=newPosBetween(prev,next); moved.upd=Date.now(); moved.by=currentUserKey;
-  target.splice(insertIndex,0,moved);
-  if(!Number.isFinite(prev)||!Number.isFinite(next)||Math.abs((next||moved.pos)-(prev||0))<1e-6){ reindex(target); }
-  renderBoard(); pushTabs();
-}
-const pushTabs = debounce(()=> {
-  try { liveSend({ type:'tabs:update', tabs: tabData }); } catch {}
-  saveTabsHTTP(tabData).catch(()=>{});
-  stampSync();
-}, 250);
+function persistTaskEdits(taskId, patch){ if(!activeTab || !tabData[activeTab]) return; for(const col of COLS){ const list=tabData[activeTab][col]||[]; const idx=list.findIndex(t=>t.id===taskId); if(idx!==-1){ if('dueDate' in patch) patch.dueDate=normalizeDateString(patch.dueDate); list[idx]={ ...list[idx], ...patch, upd:Date.now(), by: currentUserKey }; break; } } pushTabs(); }
+function removeTaskById(taskId){ if(!activeTab || !tabData[activeTab]) return; for(const col of COLS){ const list=tabData[activeTab][col]||[]; const idx=list.findIndex(t=>t.id===taskId); if(idx!==-1){ list.splice(idx,1); break; } } renderBoard(); pushTabs(); }
+function clearAllTasks(){ if(currentRole==='viewer') return; if(!activeTab) return; if(!confirm('Clear all tasks in this tab?')) return; tabData[activeTab]={ todo:[], inprogress:[], done:[] }; renderBoard(); pushTabs(); }
+function addNewTask(){ if(currentRole==='viewer') return; if(!activeTab){ const def='Click to edit'; if(!tabData[def]) tabData[def]={ todo:[], inprogress:[], done:[] }; activeTab=def; renderTabs(); } const id=`task-${cryptoRandom()}`; const now=Date.now(); const t={ id, content:'', dueDate:'', priority:'Medium', pos:(tabData[activeTab].todo.slice(-1)[0]?.pos||0)+1, upd:now, by:currentUserKey }; tabData[activeTab].todo.push(t); renderBoard(); pushTabs(); const el=document.getElementById(id)?.querySelector('.editable'); if(el){ el.focus(); } }
+function commitReorder(taskId,fromCol,toCol,insertIndex){ if(currentRole==='viewer') return; const cols=tabData[activeTab]; let moved; const fromList=cols[fromCol]||[]; const i=fromList.findIndex(t=>t.id===taskId); if(i!==-1){ moved=fromList.splice(i,1)[0]; } if(!moved) return; const target=cols[toCol]=cols[toCol]||[]; if(insertIndex==null||insertIndex<0) insertIndex=target.length; if(insertIndex>target.length) insertIndex=target.length; const prev=target[insertIndex-1]?.pos, next=target[insertIndex]?.pos; moved.pos=newPosBetween(prev,next); moved.upd=Date.now(); moved.by=currentUserKey; target.splice(insertIndex,0,moved); if(!Number.isFinite(prev)||!Number.isFinite(next)||Math.abs((next||moved.pos)-(prev||0))<1e-6){ reindex(target); } renderBoard(); pushTabs(); }
+const pushTabs=debounce(()=>{ try{ liveSend({ type:'tabs:update', tabs: tabData }); }catch{} saveTabsHTTP(tabData); stampSync(); },250);
+function stampSync(){ lastSyncedAt=new Date(); qs('#lastSynced').textContent='Last synced: '+ lastSyncedAt.toLocaleTimeString(); }
 
 /* ---------------- Members UI ---------------- */
-function openMembers(){ const m=document.getElementById('membersModal'); if(m) { m.classList.remove('hidden'); renderMembers(); } }
-function closeMembers(){ const m=document.getElementById('membersModal'); if(m) m.classList.add('hidden'); }
-async function renderMembers(){
-  const list = document.getElementById('membersList'); if(!list) return;
-  list.innerHTML = '<div class="py-6 text-sm text-gray-500">Loading…</div>';
-  const shares = await listShares();
-  list.innerHTML = '';
-  shares.forEach(s=>{
-    const row=document.createElement('div');
-    row.className='flex items-center justify-between py-3';
-    const who=document.createElement('div'); who.className='flex items-center gap-3';
-    const bubble=document.createElement('div'); bubble.className='h-8 w-8 rounded-full bg-indigo-600/15 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-xs font-semibold';
-    bubble.textContent = initials('', s.email||'');
-    const meta=document.createElement('div'); meta.innerHTML = `<div class="text-sm font-medium">${s.email||'—'}</div>`;
-    who.appendChild(bubble); who.appendChild(meta);
+function openMembers(){ qs('#membersModal').classList.remove('hidden'); renderMembers(); }
+function closeMembers(){ qs('#membersModal').classList.add('hidden'); }
+async function renderMembers(){ const list=qs('#membersList'); list.innerHTML='<div class="py-6 text-sm text-gray-500">Loading…</div>'; const shares=await listShares(); list.innerHTML=''; shares.forEach(s=>{ const row=document.createElement('div'); row.className='flex items-center justify-between py-3'; const who=document.createElement('div'); who.className='flex items-center gap-3'; const bubble=document.createElement('div'); bubble.className='h-8 w-8 rounded-full bg-indigo-600/15 text-indigo-700 dark:text-indigo-300 flex items-center justify-center text-xs font-semibold'; bubble.textContent=initials('', s.email||''); const meta=document.createElement('div'); meta.innerHTML=`<div class="text-sm font-medium">${s.email||'—'}</div>`; who.appendChild(bubble); who.appendChild(meta); const actions=document.createElement('div'); actions.className='flex items-center gap-2'; if(s.role==='owner'){ const tag=document.createElement('span'); tag.className='text-xs text-gray-500'; tag.textContent='owner'; actions.appendChild(tag); }else if(currentRole==='owner' && s.id){ const sel=document.createElement('select'); sel.className='text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-800'; ['editor','viewer','owner'].forEach(r=>{ const o=document.createElement('option'); o.value=r; o.text=r; if(String(s.role||'editor')===r) o.selected=true; sel.appendChild(o); }); sel.onchange=async()=>{ if(sel.value==='owner'){ if(!confirm(`Transfer ownership to ${s.email}? You will lose owner privileges.`)){ sel.value=s.role||'editor'; return; } const r=await transferOwner(s.email||''); if(!r||r.error){ alert('Failed to transfer'); sel.value=s.role||'editor'; }else{ alert('Ownership transferred'); closeMembers(); location.reload(); } return;} const r=await patchShareRole(s.id, sel.value); if(r && r.error) alert('Failed to update role'); }; const del=document.createElement('button'); del.className='px-2 py-1 text-xs rounded bg-red-50 text-red-600 hover:bg-red-100'; del.textContent='Remove'; del.onclick=async()=>{ if(!confirm('Remove this member?')) return; try{ await removeShare(s.id); renderMembers(); }catch{ alert('Failed to remove'); } }; actions.appendChild(sel); actions.appendChild(del); } row.appendChild(who); row.appendChild(actions); list.appendChild(row); }); }
 
-    const actions=document.createElement('div'); actions.className='flex items-center gap-2';
-    if (s.role === 'owner') {
-      const tag=document.createElement('span'); tag.className='text-xs text-gray-500'; tag.textContent='owner';
-      actions.appendChild(tag);
-    } else if (currentRole==='owner' && s.id) {
-      const sel=document.createElement('select');
-      sel.className='text-xs border border-gray-300 dark:border-gray-600 rounded px-2 py-1 bg-white dark:bg-gray-800';
-      ['editor','viewer','owner'].forEach(r=>{ const o=document.createElement('option'); o.value=r; o.text=r; if(String(s.role||'editor')===r) o.selected=true; sel.appendChild(o); });
-      sel.onchange = async ()=>{
-        if(sel.value==='owner'){
-          if(!confirm(`Transfer ownership to ${s.email}? You will lose owner privileges.`)) { sel.value = s.role||'editor'; return; }
-          const r=await transferOwner(s.email||''); if(!r.ok){ alert('Failed to transfer'); sel.value=s.role||'editor'; } else { alert('Ownership transferred'); closeMembers(); location.reload(); }
-          return;
-        }
-        const r=await patchShareRole(s.id, sel.value); if(!r.ok) alert('Failed to update role');
-      };
-      const del=document.createElement('button'); del.className='px-2 py-1 text-xs rounded bg-red-50 text-red-600 hover:bg-red-100'; del.textContent='Remove';
-      del.onclick = async ()=>{ if(!confirm('Remove this member?')) return; const r=await removeShare(s.id); if(r.ok) renderMembers(); else alert('Failed to remove'); };
-      actions.appendChild(sel); actions.appendChild(del);
-    }
-    row.appendChild(who); row.appendChild(actions); list.appendChild(row);
-  });
-}
+/* ---------------- Boot orchestration (continued in Part 2) ---------------- */
+// PART SPLIT —— STOP HERE. Paste Part 2 contents directly after this script closing tag in the same file.
+<script>
+/* ---------------- Boot + Fallback orchestration (Part 2) ---------------- */
 
-/* ---------------- Boot / fallback orchestration ---------------- */
-const addTabBtn=document.getElementById('addTabBtn'); if(addTabBtn){ addTabBtn.onclick = ()=>{ if(currentRole==='viewer') return; const name=prompt('Enter tab name:'); if(!name||!name.trim()) return; const n=name.trim(); if(tabData[n]) return switchTab(n); tabData[n]={ todo:[], inprogress[], done:[] }; }; }
-// ^ Fix: build proper object below (typo guard)
-if(addTabBtn){ addTabBtn.onclick = ()=>{ if(currentRole==='viewer') return; const name=prompt('Enter tab name:'); if(!name||!name.trim()) return; const n=name.trim(); if(tabData[n]) return switchTab(n); tabData[n]={ todo:[], inprogress:[], done:[] }; renderTabs(); switchTab(n); pushTabs(); }; }
-
-const newTaskBtn=document.getElementById('newTaskBtn'); if(newTaskBtn) newTaskBtn.onclick = addNewTask;
-const clearBtn=document.getElementById('clearBtn'); if(clearBtn) clearBtn.onclick = clearAllTasks;
-const exportBtn=document.getElementById('exportBtn'); if(exportBtn) exportBtn.onclick = ()=>{ const board=document.getElementById('board'); if(!board) return; html2pdf().set({ margin:.5, filename:'Solara-Board.pdf', image:{type:'jpeg',quality:.98}, html2canvas:{scale:2}, jsPDF:{unit:'in', format:'letter', orientation:'landscape'} }).from(board).save(); };
-const manageBtn=document.getElementById('manageBtn'); if(manageBtn) manageBtn.onclick = ()=>{ if(!WORKSPACE_ID) return alert('Open a workspace first.'); openMembers(); };
-
-const userButton=document.getElementById('userButton'); if(userButton) userButton.onclick = ()=>{ const m=document.getElementById('userMenu'); if(m) m.classList.toggle('hidden'); };
-const addUserBtn=document.getElementById('addUserBtn'); if(addUserBtn) addUserBtn.onclick = ()=> openMembers();
-const signOutBtn=document.getElementById('signOutBtn');
-if(signOutBtn){ signOutBtn.onclick = async ()=>{
-  try{ if(sessionJWT){ await apiFetch('logout', { method:'POST' }).catch(()=>{}); } } finally {
-    try{ localStorage.removeItem('stytch_session_jwt'); localStorage.removeItem('solara_session_jwt'); }catch{}
-    location.replace('/sign-in.html');
-  }
-}; }
-const inviteBtn=document.getElementById('inviteBtn');
-if(inviteBtn){ inviteBtn.onclick = async ()=>{
-  const input=document.getElementById('inviteEmail'); const email=(input?.value||'').trim().toLowerCase(); if(!email) return;
-  const r=await invite(email); if(r.ok){ if(input) input.value=''; renderMembers(); alert('Invitation created.'); } else { alert('Invite failed.'); }
-}; }
-
-function setReportsHref(){
-  const btn=document.getElementById('reportsLink');
-  if(btn){ btn.onclick=()=>{ if(!WORKSPACE_ID){ alert('Open a workspace first.'); return; } location.href=`reports.html?ws=${encodeURIComponent(WORKSPACE_ID)}`; }; }
-  const logo=document.getElementById('workspacesLink'); if(logo){ logo.href='workspace.html'; }
-}
+function setReportsHref(){ const btn=document.getElementById('reportsLink'); if(btn){ btn.onclick=()=>{ if(!WORKSPACE_ID){ alert('Open a workspace first.'); return; } location.href=`reports.html?ws=${encodeURIComponent(WORKSPACE_ID)}`; }; } const logo=document.getElementById('workspacesLink'); if(logo){ logo.href='workspace.html'; } }
 function stopTaskPolling(){ if(taskPollTimer){ clearInterval(taskPollTimer); taskPollTimer=null; } }
-function startHTTPFallback(){
-  if(!presenceBeatTimer){ presenceBeatHTTP(); presenceBeatTimer = setInterval(presenceBeatHTTP, 10000); }
-  if(!presencePollTimer){ presencePollHTTP(); presencePollTimer = setInterval(presencePollHTTP, 5000); }
-  if(!taskPollTimer){
-    taskPollTimer = setInterval(async ()=>{
-      try{
-        const serverTabs = migrateShapes(await fetchTabs());
-        if (isEditing || isDragging){
-          const changed = mergeRemoteTabs(serverTabs);
-          if (changed) hasRemoteDuringEdit = true;
-          return;
-        }
-        const changed = mergeRemoteTabs(serverTabs);
-        if (changed){
-          if(!tabData[activeTab]) activeTab = Object.keys(tabData)[0]||activeTab;
-          renderTabs(); switchTab(activeTab); stampSync();
-        }
-      }catch{}
-    }, 2000);
-  }
+function startHTTPFallback(){ if(!presenceBeatTimer){ presenceBeatHTTP(); presenceBeatTimer=setInterval(presenceBeatHTTP,10000); } if(!presencePollTimer){ presencePollHTTP(); presencePollTimer=setInterval(presencePollHTTP,5000); } if(!taskPollTimer){ taskPollTimer=setInterval(async()=>{ try{ const serverTabs=migrateShapes(await fetchTabs()); if(isEditing || isDragging){ const changed=mergeRemoteTabs(serverTabs); if(changed) hasRemoteDuringEdit=true; return; } const changed=mergeRemoteTabs(serverTabs); if(changed){ if(!tabData[activeTab]) activeTab=Object.keys(tabData)[0]||activeTab; renderTabs(); switchTab(activeTab); stampSync(); } }catch(e){ logDebug('task poll error', e?.status||e?.message); } }, 2000); } }
+
+function ensureWorkspaceIdInURL(id){ try{ const url=new URL(location.href); if(url.searchParams.get('ws')!==id){ url.searchParams.set('ws',id); history.replaceState({},'', url.toString()); } }catch{} }
+
+async function chooseOrCreateWorkspace(){
+  // Try to find a workspace if none specified; do NOT create on server here, just pick first.
+  try{
+    const wlist=await apiFetch('workspaces');
+    const arr=(wlist.workspaces||[]);
+    if(arr.length>0){ const ws=arr[0]; return { id: ws.id, name: ws.name||'' } }
+  }catch(e){ logDebug('workspaces list failed', e?.status); }
+  return { id:'', name:'' };
+}
+
+async function hydrateWorkspaceMeta(){
+  currentRole = await fetchRole();
+  try{
+    const wlist = await apiFetch('workspaces');
+    const wsRow = (wlist.workspaces||[]).find(w=>w.id===WORKSPACE_ID);
+    WORKSPACE_NAME = wsRow?.name || '';
+    if (wsRow && wsRow.owner_id && currentRole !== 'owner' && wsRow.owner_id === currentUserKey) currentRole = 'owner';
+  }catch(e){ logDebug('hydrate meta failed', e?.status); }
+  document.getElementById('wsName').textContent = WORKSPACE_NAME || '\u2014';
 }
 
 async function boot(){
-  const ok = await verifySessionAndHydrate();
-  if(!ok){ safeRedirectToSignIn(); return; }
+  const ok=await verifySessionAndHydrate(); if(!ok) return;
 
   const url=new URL(location.href);
   WORKSPACE_ID = url.searchParams.get('ws') || localStorage.getItem('solara_last_ws') || '';
-  if(!WORKSPACE_ID){ const b=document.getElementById('wsBanner'); if(b) b.classList.remove('hidden'); }
-  else { try{ localStorage.setItem('solara_last_ws', WORKSPACE_ID); }catch{} }
+
+  if(!WORKSPACE_ID){
+    const pick=await chooseOrCreateWorkspace();
+    if(pick.id){ WORKSPACE_ID=pick.id; WORKSPACE_NAME=pick.name; localStorage.setItem('solara_last_ws', WORKSPACE_ID); ensureWorkspaceIdInURL(WORKSPACE_ID); document.getElementById('wsBanner').classList.add('hidden'); }
+    else { document.getElementById('wsBanner').classList.remove('hidden'); }
+  }else{
+    localStorage.setItem('solara_last_ws', WORKSPACE_ID);
+  }
 
   updateAuthUI();
   setReportsHref();
 
-  // Role + Name
-  currentRole = await fetchRole();
-  const wlist = await apiFetch('workspaces').then(r=>r.ok?r.json():{workspaces:[]}).catch(()=>({workspaces:[]}));
-  const wsRow = (wlist.workspaces||[]).find(w=>w.id===WORKSPACE_ID);
-  WORKSPACE_NAME = wsRow?.name || '';
-  const wsNameEl=document.getElementById('wsName'); if(wsNameEl) wsNameEl.textContent = WORKSPACE_NAME || '—';
-  if (wsRow && wsRow.owner_id && currentRole !== 'owner' && wsRow.owner_id === currentUserKey) currentRole = 'owner';
+  await hydrateWorkspaceMeta();
 
-  // HTTP bootstrap
-  tabData = migrateShapes(await fetchTabs());
-  if(Object.keys(tabData).length===0){ tabData['Click to edit']={ todo:[], inprogress:[], done:[] }; }
+  // HTTP bootstrap for tasks
+  try{
+    const serverTabs = migrateShapes(await fetchTabs());
+    tabData = Object.keys(serverTabs).length? serverTabs : { 'Click to edit': { todo:[], inprogress:[], done:[] } };
+  }catch{ tabData = { 'Click to edit': { todo:[], inprogress:[], done:[] } }; }
   activeTab = Object.keys(tabData)[0];
   renderTabs(); switchTab(activeTab);
 
   // Fallback + Live
   startHTTPFallback();
   connectLive();
+
+  // Wire UI buttons
+  document.getElementById('addTabBtn').onclick=()=>{ if(currentRole==='viewer') return; const name=prompt('Enter tab name:'); if(!name||!name.trim()) return; const n=name.trim(); if(tabData[n]) return switchTab(n); tabData[n]={ todo:[], inprogress:[], done:[] }; renderTabs(); switchTab(n); pushTabs(); };
+  document.getElementById('newTaskBtn').onclick=addNewTask;
+  document.getElementById('clearBtn').onclick=clearAllTasks;
+  document.getElementById('exportBtn').onclick=()=>{ const board=document.getElementById('board'); html2pdf().set({ margin:.5, filename:'Solara-Board.pdf', image:{type:'jpeg',quality:.98}, html2canvas:{scale:2}, jsPDF:{unit:'in', format:'letter', orientation:'landscape'} }).from(board).save(); };
+  document.getElementById('manageBtn').onclick=()=>{ if(!WORKSPACE_ID) return alert('Open a workspace first.'); openMembers(); };
+  document.getElementById('userButton').onclick=()=> document.getElementById('userMenu').classList.toggle('hidden');
+  document.getElementById('addUserBtn').onclick=()=> openMembers();
+  document.getElementById('signOutBtn').onclick=async()=>{
+    try{ await apiFetch('logout',{ method:'POST' }); }catch{}
+    finally{ localStorage.removeItem('stytch_session_jwt'); localStorage.removeItem('solara_session_jwt'); location.replace('/sign-in.html'); }
+  };
+  document.getElementById('inviteBtn').onclick=async()=>{ const input=document.getElementById('inviteEmail'); const email=(input.value||'').trim().toLowerCase(); if(!email) return; try{ await invite(email); input.value=''; renderMembers(); alert('Invitation created.'); }catch{ alert('Invite failed.'); } };
+
+  logDebug('boot complete',{ ws:WORKSPACE_ID, role:currentRole });
 }
 
-document.addEventListener('DOMContentLoaded', boot);
+/* ---------------- Init ---------------- */
+if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', boot); } else { boot(); }
 </script>
 </body>
 </html>
