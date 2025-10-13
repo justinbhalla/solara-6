@@ -1,4 +1,5 @@
-<!-- Solara v10.2 — Split Part 1 of 2 (UI + Core Logic; add Part 2 <script> before </body>) -->
+<!-- Solara v10.2 — smooth sync (UI/UX + full features) | PART 1/2
+Save this as solara.html. Then open PART 2 and append its content to the end of this file. -->
 <!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
@@ -17,7 +18,7 @@
     .date-badge{ font-variant-numeric: tabular-nums }
     .presence-dot{ position:absolute; right:-2px; bottom:-2px; width:10px; height:10px; border-radius:999px; background:#10b981; border:2px solid white }
     .avatar{ position:relative }
-    footer .slot{ min-width:0 }
+    footer .slot{ min-width: 0 }
   </style>
 </head>
 <body class="flex flex-col min-h-screen bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">
@@ -110,7 +111,7 @@
     <div class="flex items-center gap-2 w-full overflow-x-auto px-1 py-1">
       <div id="tabs" class="flex gap-2 min-w-max"></div>
       <button id="addTabBtn" title="Add Tab" class="p-2 rounded-full bg-green-100 hover:bg-green-200 text-green-700 transition duration-150 shadow-sm border border-green-200">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 4v16m8-8H4"/></svg>
       </button>
     </div>
     <div class="flex items-center gap-1">
@@ -129,7 +130,7 @@
   </footer>
 </div>
 
-<!-- Members Modal -->
+<!-- Members Modal (unchanged behavior) -->
 <div id="membersModal" class="hidden fixed inset-0 z-[60] flex items-center justify-center">
   <div class="absolute inset-0 bg-black/40" onclick="closeMembers()"></div>
   <div class="relative w-full max-w-lg rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-5 shadow-xl">
@@ -147,12 +148,15 @@
   </div>
 </div>
 
+<!-- APP SCRIPT IS IN PART 2. Append the Part 2 contents after this line. -->
+<!-- Solara v10.2 — smooth sync | PART 2/2
+Append everything below to the bottom of PART 1 (same file). Do NOT add another <!DOCTYPE> or <html> tag. -->
 <script>
-/*********************** CONFIG ************************/
+/* ---------------- CONFIG ---------------- */
 const API_BASE = "https://shy-smoke-ab8e.justinbhalla28.workers.dev";
 const apiUrl = p => API_BASE.replace(/\/+$/,'') + '/' + String(p||'').replace(/^\/+/,'');
 
-/*********************** STATE *************************/
+/* ---------------- STATE ---------------- */
 let WORKSPACE_ID = '';
 let WORKSPACE_NAME = '';
 let sessionJWT = null;
@@ -179,7 +183,7 @@ let isDragging = false;
 let editingTasks = new Set();
 let hasRemoteDuringEdit = false;
 
-/*********************** UTIL **************************/
+/* ---------------- UTIL ---------------- */
 const debounce = (fn, ms=400)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; };
 function getSessionJWT(){
   const m = document.cookie.match(/(?:^|; )(?:stytch_session_jwt|solara_session_jwt)=([^;]+)/);
@@ -187,50 +191,75 @@ function getSessionJWT(){
 }
 function initials(name,email){ const parts=(name||'').trim().split(/\s+/).filter(Boolean); return parts.length?parts.slice(0,2).map(s=>s[0]).join('').toUpperCase():(email||'?').slice(0,2).toUpperCase(); }
 function normalizeDateString(v){ if(!v) return ''; if(/^\d{4}-\d{2}-\d{2}$/.test(v)) return v; const d=new Date(v); if(isNaN(d)) return ''; const tz=d.getTimezoneOffset()*60000; return new Date(d.getTime()-tz).toISOString().slice(0,10); }
-function stampSync(){ lastSyncedAt = new Date(); document.getElementById('lastSynced').textContent = 'Last synced: ' + lastSyncedAt.toLocaleTimeString(); }
+function stampSync(){ lastSyncedAt = new Date(); const el=document.getElementById('lastSynced'); if(el) el.textContent = 'Last synced: ' + lastSyncedAt.toLocaleTimeString(); }
 
-/*********************** AUTH ***************************/
+// Robust fetch with credentials + bearer fallback
+async function apiFetch(path, opts={}){
+  const headers = Object.assign({'Content-Type':'application/json'}, opts.headers||{});
+  const token = sessionJWT || getSessionJWT();
+  if(token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(apiUrl(path), {
+    ...opts,
+    headers,
+    credentials: 'include', // allow cookie session if present
+    mode: 'cors'
+  });
+  return res;
+}
+
+/* ---------------- AUTH ---------------- */
 function displayNameFor(u){ const f=u?.name?.first_name, l=u?.name?.last_name, e=u?.email_addresses?.[0]?.email_address; return [f,l].filter(Boolean).join(' ') || e || 'User'; }
 function updateAuthUI(){
   const name=displayNameFor(authedUser);
   const email=authedUser?.email_addresses?.[0]?.email_address||'';
-  document.getElementById('avatar').textContent = initials(name,email);
-  document.getElementById('userName').textContent = name;
-  document.getElementById('userEmail').textContent = email;
+  const av=document.getElementById('avatar'); if(av) av.textContent = initials(name,email);
+  const un=document.getElementById('userName'); if(un) un.textContent = name;
+  const ue=document.getElementById('userEmail'); if(ue) ue.textContent = email;
+}
+function safeRedirectToSignIn(){
+  // prevent loops: only redirect if we're not already on sign-in
+  const here = location.pathname.toLowerCase();
+  if(here.includes('/sign-in')) return;
+  // clear stale tokens then redirect
+  try{ localStorage.removeItem('stytch_session_jwt'); localStorage.removeItem('solara_session_jwt'); }catch{}
+  location.replace('/sign-in.html');
 }
 async function verifySessionAndHydrate(){
   sessionJWT = getSessionJWT();
-  if(!sessionJWT) return false;
+  if(!sessionJWT){ return false; }
   try{
-    const r = await fetch(apiUrl('auth/check'), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }});
-    if(!r.ok) return false;
+    const r = await apiFetch('auth/check', { method:'GET' });
+    if(!r.ok){ return false; }
     const data = await r.json();
     currentUserKey = data.user_id;
     const email = data.email ? [{ email_address: data.email }] : [];
-    const parts = (data.name||'').split(/\s+/); authedUser = { name:{ first_name:parts[0]||'', last_name:parts.slice(1).join(' ')||'' }, email_addresses: email };
-    localStorage.setItem('stytch_user', JSON.stringify(authedUser));
+    const parts = (data.name||'').split(/\s+/);
+    authedUser = { name:{ first_name:parts[0]||'', last_name:parts.slice(1).join(' ')||'' }, email_addresses: email };
+    try{ localStorage.setItem('stytch_user', JSON.stringify(authedUser)); }catch{}
     updateAuthUI();
     return true;
-  }catch{ return false; }
+  }catch{
+    return false;
+  }
 }
 
-/**************** MEMBERS / SHARES **********************/
-async function fetchRole(){ const r=await fetch(apiUrl(`workspaces/${encodeURIComponent(WORKSPACE_ID)}/role`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}); if(!r.ok) return 'viewer'; const j=await r.json().catch(()=>({})); return j.role||'viewer'; }
-async function listShares(){ const r=await fetch(apiUrl(`shares?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}); if(!r.ok) return []; const j=await r.json().catch(()=>({shares:[]})); return j.shares||[]; }
-async function invite(email){ return fetch(apiUrl('shares'), { method:'POST', headers:{'Authorization':`Bearer ${sessionJWT}`,'Content-Type':'application/json'}, body: JSON.stringify({ workspace_id: WORKSPACE_ID, email }) }); }
-async function patchShareRole(id, role){ return fetch(apiUrl(`shares/${id}`), { method:'PATCH', headers:{'Authorization':`Bearer ${sessionJWT}`,'Content-Type':'application/json'}, body: JSON.stringify({ role }) }); }
-async function removeShare(id){ return fetch(apiUrl(`shares/${id}`), { method:'DELETE', headers:{'Authorization':`Bearer ${sessionJWT}`}}); }
-async function transferOwner(toEmail){ return fetch(apiUrl(`workspaces/${encodeURIComponent(WORKSPACE_ID)}/transfer_owner`), { method:'POST', headers:{'Authorization':`Bearer ${sessionJWT}`,'Content-Type':'application/json'}, body: JSON.stringify({ to_email: toEmail }) }); }
+/* ---------------- MEMBERS / SHARES ---------------- */
+async function fetchRole(){ const r=await apiFetch(`workspaces/${encodeURIComponent(WORKSPACE_ID)}/role`); if(!r.ok) return 'viewer'; const j=await r.json().catch(()=>({})); return j.role||'viewer'; }
+async function listShares(){ const r=await apiFetch(`shares?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`); if(!r.ok) return []; const j=await r.json().catch(()=>({shares:[]})); return j.shares||[]; }
+async function invite(email){ return apiFetch('shares', { method:'POST', body: JSON.stringify({ workspace_id: WORKSPACE_ID, email }) }); }
+async function patchShareRole(id, role){ return apiFetch(`shares/${id}`, { method:'PATCH', body: JSON.stringify({ role }) }); }
+async function removeShare(id){ return apiFetch(`shares/${id}`, { method:'DELETE' }); }
+async function transferOwner(toEmail){ return apiFetch(`workspaces/${encodeURIComponent(WORKSPACE_ID)}/transfer_owner`, { method:'POST', body: JSON.stringify({ to_email: toEmail }) }); }
 
-/**************** TABS LOAD/SAVE ************************/
-async function fetchTabs(){ const r=await fetch(apiUrl(`tasks?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}); if(!r.ok) return {}; const j=await r.json().catch(()=>({tabs:{}})); return j.tabs||{}; }
-async function saveTabsHTTP(tabs){ await fetch(apiUrl('tasks'), { method:'POST', headers:{'Authorization':`Bearer ${sessionJWT}`,'Content-Type':'application/json'}, body: JSON.stringify({ workspace_id: WORKSPACE_ID, tabs }) }); }
+/* ---------------- TABS LOAD/SAVE ---------------- */
+async function fetchTabs(){ const r=await apiFetch(`tasks?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`); if(!r.ok) return {}; const j=await r.json().catch(()=>({tabs:{}})); return j.tabs||{}; }
+async function saveTabsHTTP(tabs){ await apiFetch('tasks', { method:'POST', body: JSON.stringify({ workspace_id: WORKSPACE_ID, tabs }) }).catch(()=>{}); }
 
-/**************** PRESENCE HTTP *************************/
-async function presenceBeatHTTP(){ try{ await fetch(apiUrl('presence/beat'), { method:'POST', headers:{ 'Authorization':`Bearer ${sessionJWT}`,'Content-Type':'application/json' }, body: JSON.stringify({ workspace_id: WORKSPACE_ID }) }); }catch{} }
+/* ---------------- PRESENCE HTTP ---------------- */
+async function presenceBeatHTTP(){ try{ await apiFetch('presence/beat', { method:'POST', body: JSON.stringify({ workspace_id: WORKSPACE_ID }) }); }catch{} }
 async function presencePollHTTP(){
   try{
-    const r = await fetch(apiUrl(`presence?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }});
+    const r = await apiFetch(`presence?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`);
     if(!r.ok) return;
     const j = await r.json().catch(()=>({online:[]}));
     const mine = currentUserKey;
@@ -240,8 +269,8 @@ async function presencePollHTTP(){
   }catch{}
 }
 
-/**************** LIVE WS ********************************/
-function liveUrl(){ try{ const u=new URL(API_BASE); u.pathname=(u.pathname.replace(/\/+$/,'')+'/live').replace(/\/{2,}/g,'/'); u.search=`?ws=${encodeURIComponent(WORKSPACE_ID)}&token=${encodeURIComponent(sessionJWT)}`; u.protocol=u.protocol.replace('http','ws'); return u.toString(); }catch{ return null; } }
+/* ---------------- LIVE WS ---------------- */
+function liveUrl(){ try{ const u=new URL(API_BASE); u.pathname=(u.pathname.replace(/\/+$/,'')+'/live').replace(/\/{2,}/g,'/'); u.search=`?ws=${encodeURIComponent(WORKSPACE_ID)}&token=${encodeURIComponent(sessionJWT||'')}`; u.protocol=u.protocol.replace('http','ws'); return u.toString(); }catch{ return null; } }
 function connectLive(){
   const url = liveUrl(); if(!url) { startHTTPFallback(); return; }
   try { ws = new WebSocket(url); } catch { startHTTPFallback(); return; }
@@ -275,11 +304,12 @@ function connectLive(){
 }
 function liveSend(obj){ if(ws && ws.readyState===1){ try{ ws.send(JSON.stringify({ ...obj, ws: WORKSPACE_ID })); }catch{} } }
 
-/**************** PRESENCE UI ****************************/
+/* ---------------- PRESENCE UI ---------------- */
 function renderPresence(){
   const avatars=document.getElementById('presenceAvatars');
   const list=document.getElementById('presenceList');
   const count=document.getElementById('presenceCount');
+  if(!avatars||!list||!count) return;
   avatars.innerHTML=''; list.innerHTML='';
 
   const others = [...presence.entries()].map(([id,v])=>({id,...v})).sort((a,b)=>(a.name||a.email).localeCompare(b.name||b.email));
@@ -307,20 +337,15 @@ function renderPresence(){
     more.textContent = `+${extra}`; avatars.appendChild(more);
   }
 }
+const presenceBtn=document.getElementById('presenceBtn');
+if(presenceBtn){ presenceBtn.onclick = ()=>{ const t=document.getElementById('presenceTooltip'); if(t) t.classList.toggle('hidden'); }; }
 
-document.getElementById('presenceBtn').onclick = ()=>{
-  const t=document.getElementById('presenceTooltip');
-  t.classList.toggle('hidden');
-};
-
-/**************** MERGE (preserve edits) *****************/
+/* ---------------- MERGE (preserve edits) ---------------- */
 function mergeRemoteTabs(remote, by){
   const prevJSON = JSON.stringify(tabData);
   const local = tabData;
   const editingIds = new Set(editingTasks);
-
   tabData = JSON.parse(JSON.stringify(remote||{}));
-
   if (editingIds.size){
     for (const tabName of Object.keys(tabData)) {
       for (const col of COLS) {
@@ -329,15 +354,12 @@ function mergeRemoteTabs(remote, by){
           const t = list[i];
           if (editingIds.has(t.id)){
             const lt = findTask(local, t.id);
-            if (lt){
-              list[i] = { ...t, content: lt.content, dueDate: lt.dueDate, priority: lt.priority, pos: lt.pos, upd: lt.upd, by: lt.by };
-            }
+            if (lt){ list[i] = { ...t, content: lt.content, dueDate: lt.dueDate, priority: lt.priority, pos: lt.pos, upd: lt.upd, by: lt.by }; }
           }
         }
       }
     }
   }
-
   return JSON.stringify(tabData) !== prevJSON;
 }
 function findTask(data, id){
@@ -350,7 +372,7 @@ function findTask(data, id){
   return null;
 }
 
-/**************** SHAPE / RENDER *************************/
+/* ---------------- SHAPE / RENDER ---------------- */
 function migrateShapes(data){
   const out=JSON.parse(JSON.stringify(data||{}));
   Object.keys(out).forEach(tab=>{
@@ -372,7 +394,7 @@ function migrateShapes(data){
 function cryptoRandom(){ try{ return crypto.randomUUID(); }catch{ return Math.random().toString(36).slice(2); } }
 
 function renderTabs(){
-  const node=document.getElementById('tabs'); node.innerHTML='';
+  const node=document.getElementById('tabs'); if(!node) return; node.innerHTML='';
   const names=Object.keys(tabData);
   names.forEach(name=>{
     const b=document.createElement('button');
@@ -445,6 +467,7 @@ function renderBoard(){
   const columns = COLS;
   columns.forEach(col=>{
     const colEl=document.getElementById(col);
+    if(!colEl) return;
     colEl.querySelectorAll('[data-task]')?.forEach(n=>n.remove());
 
     colEl.ondragover = (e)=>{
@@ -471,11 +494,12 @@ function renderBoard(){
   const data=tabData[activeTab];
   COLS.forEach(col=>{
     const colEl=document.getElementById(col);
+    if(!colEl) return;
     (data[col]||[]).sort((a,b)=> (a.pos||0)-(b.pos||0)).forEach(t=> colEl.appendChild(createTaskElement(t.id,t.content,t.dueDate,t.priority,col,t.pos)));
   });
 }
 
-/************ Mutations -> Live push ********************/
+/* ---------------- Mutations -> Live push ---------------- */
 function persistTaskEdits(taskId, patch){
   if(!activeTab || !tabData[activeTab]) return;
   const cols=COLS;
@@ -535,11 +559,11 @@ const pushTabs = debounce(()=> {
   stampSync();
 }, 250);
 
-/**************** Members UI ****************************/
-function openMembers(){ document.getElementById('membersModal').classList.remove('hidden'); renderMembers(); }
-function closeMembers(){ document.getElementById('membersModal').classList.add('hidden'); }
+/* ---------------- Members UI ---------------- */
+function openMembers(){ const m=document.getElementById('membersModal'); if(m) { m.classList.remove('hidden'); renderMembers(); } }
+function closeMembers(){ const m=document.getElementById('membersModal'); if(m) m.classList.add('hidden'); }
 async function renderMembers(){
-  const list = document.getElementById('membersList');
+  const list = document.getElementById('membersList'); if(!list) return;
   list.innerHTML = '<div class="py-6 text-sm text-gray-500">Loading…</div>';
   const shares = await listShares();
   list.innerHTML = '';
@@ -576,7 +600,31 @@ async function renderMembers(){
   });
 }
 
-/**************** Helpers used by Part 2 ****************/
+/* ---------------- Boot / fallback orchestration ---------------- */
+const addTabBtn=document.getElementById('addTabBtn'); if(addTabBtn){ addTabBtn.onclick = ()=>{ if(currentRole==='viewer') return; const name=prompt('Enter tab name:'); if(!name||!name.trim()) return; const n=name.trim(); if(tabData[n]) return switchTab(n); tabData[n]={ todo:[], inprogress[], done:[] }; }; }
+// ^ Fix: build proper object below (typo guard)
+if(addTabBtn){ addTabBtn.onclick = ()=>{ if(currentRole==='viewer') return; const name=prompt('Enter tab name:'); if(!name||!name.trim()) return; const n=name.trim(); if(tabData[n]) return switchTab(n); tabData[n]={ todo:[], inprogress:[], done:[] }; renderTabs(); switchTab(n); pushTabs(); }; }
+
+const newTaskBtn=document.getElementById('newTaskBtn'); if(newTaskBtn) newTaskBtn.onclick = addNewTask;
+const clearBtn=document.getElementById('clearBtn'); if(clearBtn) clearBtn.onclick = clearAllTasks;
+const exportBtn=document.getElementById('exportBtn'); if(exportBtn) exportBtn.onclick = ()=>{ const board=document.getElementById('board'); if(!board) return; html2pdf().set({ margin:.5, filename:'Solara-Board.pdf', image:{type:'jpeg',quality:.98}, html2canvas:{scale:2}, jsPDF:{unit:'in', format:'letter', orientation:'landscape'} }).from(board).save(); };
+const manageBtn=document.getElementById('manageBtn'); if(manageBtn) manageBtn.onclick = ()=>{ if(!WORKSPACE_ID) return alert('Open a workspace first.'); openMembers(); };
+
+const userButton=document.getElementById('userButton'); if(userButton) userButton.onclick = ()=>{ const m=document.getElementById('userMenu'); if(m) m.classList.toggle('hidden'); };
+const addUserBtn=document.getElementById('addUserBtn'); if(addUserBtn) addUserBtn.onclick = ()=> openMembers();
+const signOutBtn=document.getElementById('signOutBtn');
+if(signOutBtn){ signOutBtn.onclick = async ()=>{
+  try{ if(sessionJWT){ await apiFetch('logout', { method:'POST' }).catch(()=>{}); } } finally {
+    try{ localStorage.removeItem('stytch_session_jwt'); localStorage.removeItem('solara_session_jwt'); }catch{}
+    location.replace('/sign-in.html');
+  }
+}; }
+const inviteBtn=document.getElementById('inviteBtn');
+if(inviteBtn){ inviteBtn.onclick = async ()=>{
+  const input=document.getElementById('inviteEmail'); const email=(input?.value||'').trim().toLowerCase(); if(!email) return;
+  const r=await invite(email); if(r.ok){ if(input) input.value=''; renderMembers(); alert('Invitation created.'); } else { alert('Invite failed.'); }
+}; }
+
 function setReportsHref(){
   const btn=document.getElementById('reportsLink');
   if(btn){ btn.onclick=()=>{ if(!WORKSPACE_ID){ alert('Open a workspace first.'); return; } location.href=`reports.html?ws=${encodeURIComponent(WORKSPACE_ID)}`; }; }
@@ -604,79 +652,25 @@ function startHTTPFallback(){
     }, 2000);
   }
 }
-/**************** DOM EVENTS & ACTIONS *******************/
-document.getElementById('addTabBtn').onclick = ()=>{ if(currentRole==='viewer') return; const name=prompt('Enter tab name:'); if(!name||!name.trim()) return; const n=name.trim(); if(tabData[n]) return switchTab(n); tabData[n]={ todo:[], inprogress:[], done:[] }; renderTabs(); switchTab(n); pushTabs(); };
-document.getElementById('newTaskBtn').onclick = addNewTask;
-document.getElementById('clearBtn').onclick = clearAllTasks;
-document.getElementById('exportBtn').onclick = ()=>{ const board=document.getElementById('board'); html2pdf().set({ margin:.5, filename:'Solara-Board.pdf', image:{type:'jpeg',quality:.98}, html2canvas:{scale:2}, jsPDF:{unit:'in', format:'letter', orientation:'landscape'} }).from(board).save(); };
-document.getElementById('manageBtn').onclick = ()=>{ if(!WORKSPACE_ID) return alert('Open a workspace first.'); openMembers(); };
 
-document.getElementById('userButton').onclick = ()=> document.getElementById('userMenu').classList.toggle('hidden');
-document.getElementById('addUserBtn').onclick = ()=> openMembers();
-document.getElementById('signOutBtn').onclick = async ()=>{
-  try{ if(sessionJWT){ await fetch(apiUrl('logout'), { method:'POST', headers:{ 'Authorization':`Bearer ${sessionJWT}` } }).catch(()=>{}); } } finally {
-    localStorage.removeItem('stytch_session_jwt'); localStorage.removeItem('solara_session_jwt'); location.replace('/sign-in.html');
-  }
-};
-document.getElementById('inviteBtn').onclick = async ()=>{
-  const input=document.getElementById('inviteEmail'); const email=(input.value||'').trim().toLowerCase(); if(!email) return;
-  const r=await invite(email); if(r.ok){ input.value=''; renderMembers(); alert('Invitation created.'); } else { alert('Invite failed.'); }
-};
-
-/**************** Workspace Name Resolver ***************/
-async function resolveWorkspaceName(id){
-  if(!id) return '';
-  try {
-    const cache = JSON.parse(localStorage.getItem('solara_ws_names')||'{}');
-    if (cache[id]) return cache[id];
-  } catch {}
-  // Try list endpoint first
-  try {
-    const list = await fetch(apiUrl('workspaces'), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}).then(r=>r.ok?r.json():{workspaces:[]}).catch(()=>({workspaces:[]}));
-    const row = (list.workspaces||[]).find(w=>w.id===id);
-    if(row && row.name){
-      const cache = JSON.parse(localStorage.getItem('solara_ws_names')||'{}');
-      cache[id] = row.name; localStorage.setItem('solara_ws_names', JSON.stringify(cache));
-      return row.name;
-    }
-  } catch {}
-  // Fallback to single workspace endpoint if available
-  try {
-    const r = await fetch(apiUrl(`workspaces/${encodeURIComponent(id)}`), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }});
-    if (r.ok){ const j = await r.json().catch(()=>({})); if(j && j.name){
-      const cache = JSON.parse(localStorage.getItem('solara_ws_names')||'{}'); cache[id]=j.name; localStorage.setItem('solara_ws_names', JSON.stringify(cache));
-      return j.name;
-    } }
-  } catch {}
-  return '';
-}
-
-/******************** BOOT ******************************/
 async function boot(){
   const ok = await verifySessionAndHydrate();
-  if(!ok){
-    // Prevent sign-in redirect loop if already on sign-in.html
-    const onSignIn = /(^|\/)sign-in\.html$/i.test(location.pathname);
-    if(!onSignIn) { location.replace('/sign-in.html'); }
-    return;
-  }
+  if(!ok){ safeRedirectToSignIn(); return; }
 
   const url=new URL(location.href);
   WORKSPACE_ID = url.searchParams.get('ws') || localStorage.getItem('solara_last_ws') || '';
-  if(!WORKSPACE_ID){ document.getElementById('wsBanner').classList.remove('hidden'); }
-  else { localStorage.setItem('solara_last_ws', WORKSPACE_ID); }
+  if(!WORKSPACE_ID){ const b=document.getElementById('wsBanner'); if(b) b.classList.remove('hidden'); }
+  else { try{ localStorage.setItem('solara_last_ws', WORKSPACE_ID); }catch{} }
 
   updateAuthUI();
   setReportsHref();
 
   // Role + Name
   currentRole = await fetchRole();
-  const wlist = await fetch(apiUrl('workspaces'), { headers:{ 'Authorization':`Bearer ${sessionJWT}` }}).then(r=>r.ok?r.json():{workspaces:[]}).catch(()=>({workspaces:[]}));
+  const wlist = await apiFetch('workspaces').then(r=>r.ok?r.json():{workspaces:[]}).catch(()=>({workspaces:[]}));
   const wsRow = (wlist.workspaces||[]).find(w=>w.id===WORKSPACE_ID);
-
-  // Resolve & display name (with resilient fallbacks)
-  WORKSPACE_NAME = wsRow?.name || await resolveWorkspaceName(WORKSPACE_ID) || '';
-  document.getElementById('wsName').textContent = WORKSPACE_NAME || '—';
+  WORKSPACE_NAME = wsRow?.name || '';
+  const wsNameEl=document.getElementById('wsName'); if(wsNameEl) wsNameEl.textContent = WORKSPACE_NAME || '—';
   if (wsRow && wsRow.owner_id && currentRole !== 'owner' && wsRow.owner_id === currentUserKey) currentRole = 'owner';
 
   // HTTP bootstrap
@@ -692,10 +686,5 @@ async function boot(){
 
 document.addEventListener('DOMContentLoaded', boot);
 </script>
-</body>
-</html>
-
-
-<!-- Part 2 goes here -->
 </body>
 </html>
