@@ -1,10 +1,11 @@
-<!-- Solara v10.2 — smooth sync (retain all UI/UX/features from your last file) -->
+<!-- Solara v10.2.1 — smooth sync + op de-dupe + safer saves (HTML shell only) -->
 <!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
   <title>Solara – Adaptive Workspace</title>
+  <!-- External libs (keep here) -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
   <style>
@@ -129,7 +130,7 @@
   </footer>
 </div>
 
-<!-- Members Modal (unchanged behavior) -->
+  <!-- Members Modal (unchanged behavior) -->
 <div id="membersModal" class="hidden fixed inset-0 z-[60] flex items-center justify-center">
   <div class="absolute inset-0 bg-black/40" onclick="closeMembers()"></div>
   <div class="relative w-full max-w-lg rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-5 shadow-xl">
@@ -147,6 +148,7 @@
   </div>
 </div>
 <script>
+
 /* ---------------- CONFIG ---------------- */
 const API_BASE = 'https://withered-disk-2405.justinbhalla28.workers.dev';
 const apiUrl = p => API_BASE.replace(/\/+$/,'') + '/' + String(p||'').replace(/^\/+/,'');
@@ -229,7 +231,7 @@ async function verifySessionAndHydrate(){
   }catch{ return false; }
 }
 
-/* ---------------- MEMBERS / SHARES (both modes, endpoints unchanged) ---------------- */
+/* ---------------- MEMBERS / SHARES (both modes) ---------------- */
 async function fetchRole(){ const r=await apiFetch(`workspaces/${encodeURIComponent(WORKSPACE_ID)}/role`); if(!r.ok) return 'viewer'; const j=await r.json().catch(()=>({})); return j.role||'viewer'; }
 async function listShares(){ const r=await apiFetch(`shares?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`); if(!r.ok) return []; const j=await r.json().catch(()=>({shares:[]})); return j.shares||[]; }
 async function invite(email){ return apiFetch('shares', { method:'POST', body: JSON.stringify({ workspace_id: WORKSPACE_ID, email }) }); }
@@ -239,7 +241,10 @@ async function transferOwner(toEmail){ return apiFetch(`workspaces/${encodeURICo
 
 /* ---------------- v10.3 TASKS API ---------------- */
 async function fetchTabs_v10(){ const r=await apiFetch(`tasks?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`); if(!r.ok) return {}; const j=await r.json().catch(()=>({tabs:{}})); return j.tabs||{}; }
-async function saveTabsHTTP_v10(tabs){ await apiFetch('tasks', { method:'POST', body: JSON.stringify({ workspace_id: WORKSPACE_ID, tabs }) }); }
+async function saveTabsHTTP_v10(tabs){
+  try{ await apiFetch('tasks', { method:'POST', body: JSON.stringify({ workspace_id: WORKSPACE_ID, tabs }) }); }
+  catch(e){ console.error('saveTabsHTTP_v10 failed', e); }
+}
 
 /* ---------------- v11 OP-LOG API ---------------- */
 async function fetchState_v11(){ const r=await apiFetch(`state?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`); if(!r.ok) throw new Error('state_failed'); return r.json(); }
@@ -264,7 +269,7 @@ async function syncSince_v11(since){
         } else { hasRemoteDuringEdit = true; }
       }
     }
-  }catch{}
+  }catch(e){ console.warn('syncSince_v11 error', e); }
 }
 function sanitizeTabs_v11(tabs){
   const out = {};
@@ -341,12 +346,13 @@ function newPosBetween(prev, next){ const A=Number.isFinite(prev)?+prev:0; const
 
 async function sendOp_v11(type, payload){
   const op = { type, op_id: uuid(), client_id: currentUserKey||'unknown', base_seq: lastSeq||0, ts: Date.now(), payload: payload||{} };
-  // optimistic
+  // optimistic apply (advance expected seq)
   tabData = applyOpToTabs_v11(tabData, { ...op, seq: lastSeq+1 });
   renderTabs(); switchTab(activeTab);
 
-  if (wsConnected) { try{ ws.send(JSON.stringify({ type:'op:append', ws: WORKSPACE_ID, op })); return; }catch{} }
-  try{ await apiFetch('ops',{ method:'POST', body: JSON.stringify({ workspace_id: WORKSPACE_ID, op }) }); }catch{}
+  if (wsConnected) { try{ ws.send(JSON.stringify({ type:'op:append', ws: WORKSPACE_ID, op })); return; }catch(e){ console.warn('ws send failed', e); } }
+  try{ await apiFetch('ops',{ method:'POST', body: JSON.stringify({ workspace_id: WORKSPACE_ID, op }) }); }
+  catch(e){ console.error('sendOp_v11 fallback failed', e); }
 }
 
 /* ---------------- PRESENCE (HTTP fallback) ---------------- */
@@ -444,6 +450,7 @@ function renderPresence(){
     more.textContent = `+${extra}`; avatars.appendChild(more);
   }
 }
+
 document.getElementById('presenceBtn').onclick = ()=>{
   document.getElementById('presenceTooltip').classList.toggle('hidden');
 };
@@ -521,7 +528,6 @@ function renderTabs(){
   });
 }
 function switchTab(tab){ if(!tabData[tab]) return; activeTab=tab; document.querySelectorAll('.tab-button').forEach(x=>x.classList.remove('border-indigo-500','text-indigo-700','dark:text-white','font-semibold','bg-indigo-50','dark:bg-indigo-600/30')); const btn=[...document.querySelectorAll('.tab-button')].find(b=>b.dataset.tab===tab); if(btn) btn.classList.add('border-indigo-500','text-indigo-700','dark:text-white','font-semibold','bg-indigo-50','dark:bg-indigo-600/30'); renderBoard(); }
-function ensureAtLeastOne(){ const cols=tabData[activeTab]; if(!cols) return; if((cols.todo?.length||0)+(cols.inprogress?.length||0)+(cols.done?.length||0)===0){ const id=`task-${uuid()}`; cols.todo.push({ id, content:'', dueDate:'', priority:'Medium', pos:1, upd:Date.now(), by: currentUserKey }); } }
 
 function createTaskElement(id, content='', dueDate='', priority='Medium', column){
   const w=document.createElement('div');
@@ -608,7 +614,6 @@ function renderBoard(){
   });
 
   if(!activeTab || !tabData[activeTab]) return;
-  ensureAtLeastOne();
   const data=tabData[activeTab];
   COLS.forEach(col=>{
     const colEl=document.getElementById(col);
@@ -655,8 +660,8 @@ function commitReorder_v10(taskId, fromCol, toCol, insertIndex){
   renderBoard(); pushTabs_v10();
 }
 const pushTabs_v10 = debounce(()=> {
-  try { liveSend_v10({ type:'tabs:update', tabs: tabData }); } catch {}
-  saveTabsHTTP_v10(tabData).catch(()=>{});
+  try { liveSend_v10({ type:'tabs:update', tabs: tabData, by: currentUserKey }); } catch {}
+  saveTabsHTTP_v10(tabData);
   stampSync();
 }, 250);
 
@@ -743,7 +748,6 @@ document.getElementById('addTabBtn').onclick = ()=>{
   const n=name.trim(); if(tabData[n]) return switchTab(n);
   if (MODE==='v11'){
     activeTab = n;
-    // Persist immediately by creating a blank task in the new tab (so it exists server-side)
     const id=`task-${uuid()}`;
     sendOp_v11('create_task', { tab: n, column:'todo', task:{ id, content:'', dueDate:'', priority:'Medium', pos: 1 }});
   } else {
@@ -794,7 +798,7 @@ document.getElementById('signOutBtn').onclick = async ()=>{
 };
 document.getElementById('inviteBtn').onclick = async ()=>{
   const input=document.getElementById('inviteEmail'); const email=(input.value||'').trim().toLowerCase(); if(!email) return;
-  const r=await invite(email); if(r.ok){ input.value=''; renderMembers(); alert('Invitation created.'); } else { alert('Invite failed.'); }
+  const r=await invite(email); if(r.ok){ input.value=''; renderMembers(); alert('Invitation created (email delivery queued).'); } else { const msg=await r.text().catch(()=>"Invite failed."); alert(msg||'Invite failed.'); }
 };
 
 function chooseWorkspaceIdFromURL(){
@@ -806,7 +810,6 @@ function chooseWorkspaceIdFromURL(){
 
 async function detectMode(){
   try{
-    // If /state works, it's v11
     const r = await apiFetch(`state?workspace_id=${encodeURIComponent(WORKSPACE_ID)}`);
     if (r.ok) { MODE='v11'; return 'v11'; }
   }catch{}
@@ -856,8 +859,8 @@ async function boot(){
     stampSync();
   }
 }
+
 document.addEventListener('DOMContentLoaded', boot);
 </script>
-
 </body>
 </html>
