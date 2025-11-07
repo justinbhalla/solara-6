@@ -16,7 +16,7 @@
 </head>
 <body class="flex flex-col min-h-screen bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 font-sans">
 
-  <!-- Header — EXACT match with Tasks/Reports -->
+  <!-- Header -->
   <header class="flex justify-between items-center px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
     <div class="flex items-center gap-3">
       <a href="workspace.html" class="w-9 h-9 rounded-xl bg-indigo-600/10 text-indigo-600 flex items-center justify-center hover:bg-indigo-600/20" title="Back to Workspaces">🔷</a>
@@ -26,7 +26,6 @@
       </div>
     </div>
 
-    <!-- Signed-in user (same size/placement as Tasks/Reports) -->
     <div id="userArea" class="relative">
       <button id="userButton" class="flex items-center gap-2 px-3 py-2 rounded-full border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 transition">
         <span id="avatar" class="inline-flex h-7 w-7 items-center justify-center rounded-full bg-indigo-600 text-white text-xs font-semibold">?</span>
@@ -43,7 +42,7 @@
     </div>
   </header>
 
-  <!-- Toolbar — EXACT dimensions + icons from Solara (px-6 py-2, text-sm, right-aligned Trash + Plus) -->
+  <!-- Toolbar -->
   <nav class="flex items-center justify-between px-6 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm font-medium">
     <div class="flex items-center gap-6">
       <button class="flex items-center gap-2 text-indigo-600 dark:text-indigo-400 font-semibold" disabled>
@@ -52,11 +51,9 @@
       </button>
     </div>
     <div class="flex items-center gap-3">
-      <!-- Delete (bulk mode toggle) -->
       <button id="btnBulkDeleteToggle" title="Delete selected workspaces" class="p-2 rounded-full bg-red-100 text-red-600 hover:bg-red-200 transition-all">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m0 0A2.99 2.99 0 017 6h10a2.99 2.99 0 012.418 3H19v10a2 2 0 01-2 2H7a2 2 0 01-2-2V9h.582zM10 11v6m4-6v6"/></svg>
       </button>
-      <!-- Add (opens modal) -->
       <button id="btnAdd" class="px-4 py-1.5 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-500 shadow transition" title="Add workspace">+</button>
     </div>
   </nav>
@@ -75,12 +72,12 @@
     </div>
   </main>
 
-  <!-- Sticky bottom footer — exact replica spacing -->
+  <!-- Footer -->
   <div class="sticky bottom-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 z-50">
     <footer class="text-center text-xs text-gray-500 dark:text-gray-400 px-6 py-3">© 2025 ZenLock Group (ZLG). All rights reserved.</footer>
   </div>
 
-  <!-- Modal: New Workspace -->
+  <!-- Modal -->
   <div id="modal" class="hidden fixed inset-0 z-50 items-center justify-center p-4">
     <div class="absolute inset-0 bg-black/40" data-close></div>
     <div class="relative w-full max-w-md rounded-2xl bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 p-5 shadow-xl">
@@ -98,7 +95,7 @@
     </div>
   </div>
 
-  <!-- Bulk Delete Bar (appears when toggled) -->
+  <!-- Bulk Delete Bar -->
   <div id="bulkBar" class="hidden fixed bottom-4 left-1/2 -translate-x-1/2 z-40 rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 px-4 py-3 shadow-lg">
     <div class="flex items-center gap-3">
       <span id="selectedCount" class="text-sm">0 selected</span>
@@ -109,18 +106,20 @@
 
   <script>
     // ===== CONFIG =====
+    // Set API_BASE to your worker's base URL. Prefer relative origin in prod.
     const API_BASE = 'https://withered-disk-2405.justinbhalla28.workers.dev';
-    const base = () => API_BASE.replace(/\/+$|\/$/,'');
+    const base = () => API_BASE.replace(/\/+$/, '');
     const $ = (s, r=document) => r.querySelector(s);
     const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
 
-    // ===== AUTH / USER UI (matches Tasks/Reports behaviors) =====
+    // ===== AUTH / USER UI =====
     const getCookie = (n)=>{ const m=document.cookie.match(new RegExp('(?:^|; )'+n+'=([^;]+)')); return m?decodeURIComponent(m[1]):null; };
     const getJWT = ()=> (
       localStorage.getItem('stytch_session_jwt') ||
       getCookie('stytch_session_jwt') ||
       getCookie('solara_session_jwt')
     );
+
     const initialsFor = (user)=>{
       const full=((user?.name?.first_name||'')+' '+(user?.name?.last_name||'')).trim();
       const fromName=full.split(/\s+/).filter(Boolean).slice(0,2).map(s=>s[0]).join('');
@@ -140,15 +139,57 @@
     }
     let authedUser = null;
 
+    // ===== API helper (sends cookies and prefers cookie-based auth) =====
+    async function api(path, opts={}){
+      // Always include credentials so cookies (HttpOnly) are sent for cookie-based auth.
+      const token = getJWT();
+      const headers = Object.assign({'Content-Type':'application/json'}, opts.headers || {});
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch(`${base()}${path}`, {
+        ...opts,
+        mode: 'cors',
+        credentials: 'include',
+        headers
+      });
+
+      // If API reports 401, try to fall back: clear local storage JWT and redirect to sign-in
+      if (res.status === 401) {
+        // If cookie-auth failed, remove any stale local JWT so subsequent attempts rely on cookie
+        localStorage.removeItem('stytch_session_jwt');
+        // Redirect to sign-in
+        location.href='sign-in.html';
+        return null;
+      }
+
+      // Try to detect server-side unauthorized message wrapped in 500 body
+      if (res.status === 500) {
+        try {
+          const b = await res.clone().json();
+          if ((b?.error||'').toLowerCase().includes('unauthorized')) {
+            localStorage.removeItem('stytch_session_jwt');
+            location.href='sign-in.html';
+            return null;
+          }
+        } catch {}
+      }
+
+      if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
+      return res;
+    }
+
+    // Auth check that supports cookie-based sessions even when no JWT in localStorage
     async function verifySessionAndHydrate(){
-      // Try to get token but do not bail when missing — allow cookie auth via credentials
-      const jwt=getJWT();
+      // First try local JWT (fast path)
+      const jwt = getJWT();
       try{
-        const headers = {};
-        if (jwt) headers['Authorization'] = `Bearer ${jwt}`;
-        const res = await fetch(base()+'/auth/check',{ headers, mode:'cors', credentials:'include' });
+        const res = await fetch(`${base()}/auth/check`, {
+          method: 'GET',
+          credentials: 'include', // important: send cookies
+          headers: jwt ? { 'Authorization': `Bearer ${jwt}` } : {}
+        });
         if(!res.ok) return false;
-        const data=await res.json();
+        const data = await res.json();
         authedUser = JSON.parse(localStorage.getItem('stytch_user')||'null');
         if(!authedUser || (!authedUser.name && (!authedUser.email_addresses||!authedUser.email_addresses.length))){
           authedUser = hydrateFromAuthCheckPayload(data);
@@ -156,13 +197,18 @@
         }
         updateAuthUI();
         return true;
-      }catch{ return false; }
+      }catch(e){
+        console.warn('verifySession failed', e);
+        return false;
+      }
     }
+
     function updateAuthUI(){
       $('#avatar').textContent = initialsFor(authedUser||{});
       $('#userName').textContent = displayNameFor(authedUser||{}) || 'User';
       $('#userEmail').textContent = (authedUser?.email_addresses?.[0]?.email_address) || '';
     }
+
     function wireAuthButtons(){
       $('#userButton').onclick = () => $('#userMenu').classList.toggle('hidden');
       document.addEventListener('click',(e)=>{
@@ -170,9 +216,9 @@
         if(!m.classList.contains('hidden') && !m.contains(e.target) && !b.contains(e.target)) m.classList.add('hidden');
       });
       $('#signOutBtn').onclick = ()=>{
-        // clear both cookie and local storage tokens
-        document.cookie='solara_session_jwt=; Max-Age=0; Path=/; SameSite=Lax';
-        document.cookie='stytch_session_jwt=; Max-Age=0; Path=/; SameSite=Lax';
+        // Clear both cookie and local storage tokens. Note: clearing HttpOnly cookie requires server-side; here we clear local cues and navigate to sign-in which should clear cookies on server logout if implemented.
+        try{ document.cookie = 'solara_session_jwt=; Max-Age=0; Path=/; SameSite=None; Secure'; }catch{}
+        try{ document.cookie = 'stytch_session_jwt=; Max-Age=0; Path=/; SameSite=None; Secure'; }catch{}
         localStorage.removeItem('stytch_session_jwt');
         localStorage.removeItem('stytch_user');
         location.href='sign-in.html';
@@ -180,7 +226,7 @@
     }
 
     // ===== UTIL =====
-    const escapeHtml = (s='') => s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[m]||m));
+    const escapeHtml = (s='') => s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\' : '&#39;'}[m]||m));
     const timeAgo = (iso) => {
       const d=new Date(iso); const diff=(Date.now()-d.getTime())/1000;
       if(diff<60) return `${Math.floor(diff)}s ago`;
@@ -193,34 +239,6 @@
       el.className=`mb-4 p-3 rounded-xl text-sm ${kind==='error'?'bg-red-50 text-red-800 border border-red-200':'bg-emerald-50 text-emerald-800 border border-emerald-200'}`;
       el.textContent=msg; el.classList.remove('hidden');
       setTimeout(()=>el.classList.add('hidden'),3500);
-    }
-
-    // ===== API wrapper (fixed: do not pre-emptively redirect; include credentials) =====
-    async function api(path, opts = {}) {
-      const token = getJWT();
-      const headers = Object.assign({}, opts.headers || {});
-      if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-
-      const res = await fetch(`${base()}${path}`, {
-        ...opts,
-        mode: 'cors',
-        credentials: 'include',
-        headers
-      });
-
-      if (res.status === 401) { location.href = 'sign-in.html'; return null; }
-      if (res.status === 500) {
-        try {
-          const b = await res.clone().json();
-          if ((b?.error || '').toLowerCase().includes('unauthorized')) { location.href = 'sign-in.html'; return null; }
-        } catch {}
-      }
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(`API ${res.status}: ${txt}`);
-      }
-      return res;
     }
 
     function cardSkeleton(){
@@ -322,7 +340,6 @@
       }catch(err){ setAlert('error','Delete failed: '+err.message); }
     });
 
-    // Card actions
     $('#grid').addEventListener('click', async (e)=>{
       const btn=e.target.closest('button'); if(!btn) return;
       const id=btn.getAttribute('data-open')||btn.getAttribute('data-rename')||btn.getAttribute('data-delete'); if(!id) return;
