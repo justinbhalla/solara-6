@@ -61,9 +61,7 @@
   <!-- Main -->
   <main class="max-w-6xl mx-auto px-6 py-8 flex-1 w-full">
     <div id="alert" class="hidden mb-4 p-3 rounded-xl text-sm"></div>
-
     <div id="grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
-
     <div id="empty" class="hidden text-center py-20">
       <div class="mx-auto w-12 h-12 rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center mb-3">📁</div>
       <h3 class="text-lg font-semibold mb-1">No workspaces yet</h3>
@@ -72,12 +70,11 @@
     </div>
   </main>
 
-  <!-- Footer -->
   <div class="sticky bottom-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 z-50">
     <footer class="text-center text-xs text-gray-500 dark:text-gray-400 px-6 py-3">© 2025 ZenLock Group (ZLG). All rights reserved.</footer>
   </div>
 
-  <!-- Modal -->
+  <!-- Modal: New Workspace -->
   <div id="modal" class="hidden fixed inset-0 z-50 items-center justify-center p-4">
     <div class="absolute inset-0 bg-black/40" data-close></div>
     <div class="relative w-full max-w-md rounded-2xl bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 p-5 shadow-xl">
@@ -106,7 +103,6 @@
 
   <script>
     // ===== CONFIG =====
-    // Set API_BASE to your worker's base URL. Prefer relative origin in prod.
     const API_BASE = 'https://withered-disk-2405.justinbhalla28.workers.dev';
     const base = () => API_BASE.replace(/\/+$/, '');
     const $ = (s, r=document) => r.querySelector(s);
@@ -119,7 +115,6 @@
       getCookie('stytch_session_jwt') ||
       getCookie('solara_session_jwt')
     );
-
     const initialsFor = (user)=>{
       const full=((user?.name?.first_name||'')+' '+(user?.name?.last_name||'')).trim();
       const fromName=full.split(/\s+/).filter(Boolean).slice(0,2).map(s=>s[0]).join('');
@@ -139,57 +134,16 @@
     }
     let authedUser = null;
 
-    // ===== API helper (sends cookies and prefers cookie-based auth) =====
-    async function api(path, opts={}){
-      // Always include credentials so cookies (HttpOnly) are sent for cookie-based auth.
-      const token = getJWT();
-      const headers = Object.assign({'Content-Type':'application/json'}, opts.headers || {});
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-
-      const res = await fetch(`${base()}${path}`, {
-        ...opts,
-        mode: 'cors',
-        credentials: 'include',
-        headers
-      });
-
-      // If API reports 401, try to fall back: clear local storage JWT and redirect to sign-in
-      if (res.status === 401) {
-        // If cookie-auth failed, remove any stale local JWT so subsequent attempts rely on cookie
-        localStorage.removeItem('stytch_session_jwt');
-        // Redirect to sign-in
-        location.href='sign-in.html';
-        return null;
-      }
-
-      // Try to detect server-side unauthorized message wrapped in 500 body
-      if (res.status === 500) {
-        try {
-          const b = await res.clone().json();
-          if ((b?.error||'').toLowerCase().includes('unauthorized')) {
-            localStorage.removeItem('stytch_session_jwt');
-            location.href='sign-in.html';
-            return null;
-          }
-        } catch {}
-      }
-
-      if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
-      return res;
-    }
-
-    // Auth check that supports cookie-based sessions even when no JWT in localStorage
     async function verifySessionAndHydrate(){
-      // First try local JWT (fast path)
-      const jwt = getJWT();
+      const jwt=getJWT();
+      if(!jwt) {
+        // don't immediate redirect here; caller will decide
+        return false;
+      }
       try{
-        const res = await fetch(`${base()}/auth/check`, {
-          method: 'GET',
-          credentials: 'include', // important: send cookies
-          headers: jwt ? { 'Authorization': `Bearer ${jwt}` } : {}
-        });
+        const res=await fetch(base()+'/auth/check',{ method:'GET', headers:{'Authorization':`Bearer ${jwt}`,'Content-Type':'application/json'}, credentials:'include', mode:'cors' });
         if(!res.ok) return false;
-        const data = await res.json();
+        const data=await res.json();
         authedUser = JSON.parse(localStorage.getItem('stytch_user')||'null');
         if(!authedUser || (!authedUser.name && (!authedUser.email_addresses||!authedUser.email_addresses.length))){
           authedUser = hydrateFromAuthCheckPayload(data);
@@ -197,28 +151,29 @@
         }
         updateAuthUI();
         return true;
-      }catch(e){
-        console.warn('verifySession failed', e);
+      }catch(err){
+        console.warn('verifySessionAndHydrate error', err);
         return false;
       }
     }
-
     function updateAuthUI(){
       $('#avatar').textContent = initialsFor(authedUser||{});
       $('#userName').textContent = displayNameFor(authedUser||{}) || 'User';
       $('#userEmail').textContent = (authedUser?.email_addresses?.[0]?.email_address) || '';
     }
-
     function wireAuthButtons(){
       $('#userButton').onclick = () => $('#userMenu').classList.toggle('hidden');
       document.addEventListener('click',(e)=>{
         const m=$('#userMenu'); const b=$('#userButton');
         if(!m.classList.contains('hidden') && !m.contains(e.target) && !b.contains(e.target)) m.classList.add('hidden');
       });
-      $('#signOutBtn').onclick = ()=>{
-        // Clear both cookie and local storage tokens. Note: clearing HttpOnly cookie requires server-side; here we clear local cues and navigate to sign-in which should clear cookies on server logout if implemented.
-        try{ document.cookie = 'solara_session_jwt=; Max-Age=0; Path=/; SameSite=None; Secure'; }catch{}
-        try{ document.cookie = 'stytch_session_jwt=; Max-Age=0; Path=/; SameSite=None; Secure'; }catch{}
+      $('#signOutBtn').onclick = async ()=>{
+        // Try server logout then clear client data
+        try {
+          await fetch(base() + '/logout', { method:'POST', credentials:'include', mode:'cors' });
+        } catch (e) { /* ignore */ }
+        document.cookie='solara_session_jwt=; Max-Age=0; Path=/';
+        document.cookie='stytch_session_jwt=; Max-Age=0; Path=/';
         localStorage.removeItem('stytch_session_jwt');
         localStorage.removeItem('stytch_user');
         location.href='sign-in.html';
@@ -226,7 +181,7 @@
     }
 
     // ===== UTIL =====
-    const escapeHtml = (s='') => s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\' : '&#39;'}[m]||m));
+    const escapeHtml = (s='') => s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[m]||m));
     const timeAgo = (iso) => {
       const d=new Date(iso); const diff=(Date.now()-d.getTime())/1000;
       if(diff<60) return `${Math.floor(diff)}s ago`;
@@ -241,6 +196,43 @@
       setTimeout(()=>el.classList.add('hidden'),3500);
     }
 
+    // ===== API wrapper (credentials included) =====
+    async function api(path, opts = {}) {
+      const token = getJWT();
+      const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch(`${base()}${path}`, {
+        ...opts,
+        mode: 'cors',
+        credentials: 'include',        // send cookies
+        headers
+      });
+
+      // Let the caller decide how to handle 401/unauthorized
+      if (res.status === 401) {
+        console.warn('API 401', path);
+        return res;
+      }
+
+      if (res.status === 500) {
+        try {
+          const b = await res.clone().json();
+          if ((b?.error || '').toLowerCase().includes('unauthorized')) {
+            console.warn('API 500 with unauthorized hint', path, b);
+            return res;
+          }
+        } catch (e) { /* ignore parse errors */ }
+      }
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`API ${res.status}: ${text}`);
+      }
+      return res;
+    }
+
+    // ===== UI card helpers =====
     function cardSkeleton(){
       return `<article class="rounded-2xl border border-gray-200 dark:border-gray-800 p-4 bg-white dark:bg-gray-950">
         <div class="h-6 w-1/2 rounded skeleton mb-3"></div>
@@ -269,17 +261,26 @@
       </article>`;
     }
 
+    // ===== show/hide modal =====
     function showModal(on){
       const m=$('#modal'); m.classList.toggle('hidden',!on);
       if(on) setTimeout(()=>$('#wsName').focus(),0);
     }
 
+    // ===== Load workspaces =====
     async function loadWorkspaces(){
       const grid=$('#grid');
       grid.innerHTML = Array.from({length:6}).map(cardSkeleton).join('');
       try{
-        const res=await api('/workspaces'); if(!res) return;
-        const data=await res.json(); const items=data.workspaces||[];
+        const res = await api('/workspaces');
+        if (!res) { // e.g. got 401 response object
+          // if unauthorized, redirect to sign-in (server told us)
+          setAlert('error','Not authenticated. Redirecting to sign-in...');
+          location.href = 'sign-in.html';
+          return;
+        }
+        const data=await res.json();
+        const items=data.workspaces||[];
         localStorage.setItem('solara_ws_cache', JSON.stringify(items));
         if(!items.length){
           $('#empty').classList.remove('hidden'); grid.innerHTML='';
@@ -340,6 +341,7 @@
       }catch(err){ setAlert('error','Delete failed: '+err.message); }
     });
 
+    // Card actions
     $('#grid').addEventListener('click', async (e)=>{
       const btn=e.target.closest('button'); if(!btn) return;
       const id=btn.getAttribute('data-open')||btn.getAttribute('data-rename')||btn.getAttribute('data-delete'); if(!id) return;
@@ -352,7 +354,8 @@
       if(btn.hasAttribute('data-rename')){
         const name=prompt('New name?'); if(!name) return;
         try{
-          await api(`/workspaces/${id}`,{ method:'PATCH', body: JSON.stringify({ name }) });
+          const r = await api(`/workspaces/${id}`,{ method:'PATCH', body: JSON.stringify({ name }) });
+          if (!r || r.status === 401) { location.href='sign-in.html'; return; }
           setAlert('ok','Renamed.');
           loadWorkspaces();
         } catch(err){ setAlert('error','Rename failed: '+err.message); }
@@ -361,7 +364,8 @@
       if(btn.hasAttribute('data-delete')){
         if(!confirm('Delete this workspace? This cannot be undone.')) return;
         try{
-          await api(`/workspaces/${id}`,{ method:'DELETE' });
+          const r = await api(`/workspaces/${id}`,{ method:'DELETE' });
+          if (!r || r.status === 401) { location.href='sign-in.html'; return; }
           setAlert('ok','Deleted.');
           loadWorkspaces();
         } catch(err){ setAlert('error','Delete failed: '+err.message); }
@@ -373,20 +377,41 @@
     $('#formCreate').addEventListener('submit', async (e)=>{
       e.preventDefault(); const name=$('#wsName').value.trim(); if(!name) return;
       try{
-        const res=await api('/workspaces',{ method:'POST', body: JSON.stringify({ name }) });
-        if(!res) return;
+        const res = await api('/workspaces',{ method:'POST', body: JSON.stringify({ name }) });
+        if (!res) { location.href='sign-in.html'; return; } // unauthorized
         const { workspace }=await res.json();
         localStorage.setItem('solara_last_ws', String(workspace.id));
         location.href=`solara.html?ws=${encodeURIComponent(workspace.id)}`;
       } catch(err){ setAlert('error','Create failed: '+err.message); }
     });
 
-    // Boot
+    // ===== Boot sequence (server-first) =====
     (async ()=>{
-      const ok = await verifySessionAndHydrate();
-      if(!ok){ location.href='sign-in.html'; return; }
-      wireAuthButtons();
-      loadWorkspaces();
+      // Try server-side auth check (works when auth cookie is used)
+      try {
+        const res = await fetch(base() + '/auth/check', { method: 'GET', credentials: 'include', mode: 'cors', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getJWT() || ''}` }});
+        if (res && res.status === 200) {
+          const data = await res.json();
+          authedUser = hydrateFromAuthCheckPayload(data);
+          try { localStorage.setItem('stytch_user', JSON.stringify(authedUser)); } catch {}
+          updateAuthUI();
+          wireAuthButtons();
+          loadWorkspaces();
+          return;
+        } else {
+          // server said unauthorized (401) or similar -> redirect to sign-in
+          console.warn('/auth/check returned', res && res.status);
+          location.href = 'sign-in.html';
+          return;
+        }
+      } catch (err) {
+        console.warn('Server auth.check failed, falling back to client JWT verify', err);
+        // fallback: try client-side JWT verification call used previously
+        const ok = await verifySessionAndHydrate();
+        if(!ok){ location.href='sign-in.html'; return; }
+        wireAuthButtons();
+        loadWorkspaces();
+      }
     })();
   </script>
 </body>
