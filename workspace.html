@@ -110,22 +110,17 @@
   <script>
     // ===== CONFIG =====
     const API_BASE = 'https://withered-disk-2405.justinbhalla28.workers.dev';
-    const base = () => API_BASE.replace(/\/+$/, '');
+    const base = () => API_BASE.replace(/\/+$|\/$/,'');
     const $ = (s, r=document) => r.querySelector(s);
     const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
 
     // ===== AUTH / USER UI (matches Tasks/Reports behaviors) =====
     const getCookie = (n)=>{ const m=document.cookie.match(new RegExp('(?:^|; )'+n+'=([^;]+)')); return m?decodeURIComponent(m[1]):null; };
-
-    // --- tolerant getJWT: check localStorage then cookie fallbacks ---
     const getJWT = ()=> (
       localStorage.getItem('stytch_session_jwt') ||
-      localStorage.getItem('solara_session_jwt') ||
       getCookie('stytch_session_jwt') ||
-      getCookie('solara_session_jwt') ||
-      null
+      getCookie('solara_session_jwt')
     );
-
     const initialsFor = (user)=>{
       const full=((user?.name?.first_name||'')+' '+(user?.name?.last_name||'')).trim();
       const fromName=full.split(/\s+/).filter(Boolean).slice(0,2).map(s=>s[0]).join('');
@@ -145,88 +140,29 @@
     }
     let authedUser = null;
 
-    // ===== FRONTEND API helper (supports cookie fallback) =====
-    // opts can include {headers:{...}, method, body, skipAutoRedirect:true}
-    async function api(path, opts = {}) {
-      const token = getJWT();
-      const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-
-      const res = await fetch(`${base()}${path}`, {
-        method: opts.method || 'GET',
-        mode: 'cors',
-        credentials: 'include',         // IMPORTANT: allow cookies to be sent to worker
-        body: opts.body,
-        headers
-      });
-
-      // If tokenless and 401, allow caller to handle (cookie attempt may still work)
-      if (res.status === 401 && !token && !opts.skipAutoRedirect) {
-        return res;
-      }
-
-      if (res.status === 401) { if (!opts.skipAutoRedirect) location.href='sign-in.html'; return null; }
-      if (res.status === 500) {
-        try {
-          const b = await res.clone().json();
-          if ((b?.error||'').toLowerCase().includes('unauthorized')) { if (!opts.skipAutoRedirect) location.href='sign-in.html'; return null; }
-        } catch {}
-      }
-      if (!res.ok) throw new Error(`API ${res.status}: ${await res.text()}`);
-      return res;
-    }
-
     async function verifySessionAndHydrate(){
-      // 1) Fast path: try bearer (if present)
-      const jwt = getJWT();
-      if (jwt) {
-        try {
-          const res = await fetch(base() + '/auth/check', {
-            method: 'GET', mode: 'cors', credentials: 'include',
-            headers: { 'Authorization': `Bearer ${jwt}` }
-          });
-          if (res.ok) {
-            const data = await res.json();
-            authedUser = JSON.parse(localStorage.getItem('stytch_user')||'null');
-            if(!authedUser || (!authedUser.name && (!authedUser.email_addresses||!authedUser.email_addresses.length))){
-              authedUser = hydrateFromAuthCheckPayload(data);
-              try{ localStorage.setItem('stytch_user', JSON.stringify(authedUser)); }catch{}
-            }
-            updateAuthUI();
-            return true;
-          }
-          // if bearer rejected, fall through to cookie attempt
-        } catch (e) {
-          // network or worker error — fall through to cookie attempt
-        }
-      }
-
-      // 2) Try cookie-based session (no Authorization header)
-      try {
-        const res = await fetch(base() + '/auth/check', {
-          method: 'GET', mode: 'cors', credentials: 'include'
-        });
-        if (res.ok) {
-          const data = await res.json();
+      // Try to get token but do not bail when missing — allow cookie auth via credentials
+      const jwt=getJWT();
+      try{
+        const headers = {};
+        if (jwt) headers['Authorization'] = `Bearer ${jwt}`;
+        const res = await fetch(base()+'/auth/check',{ headers, mode:'cors', credentials:'include' });
+        if(!res.ok) return false;
+        const data=await res.json();
+        authedUser = JSON.parse(localStorage.getItem('stytch_user')||'null');
+        if(!authedUser || (!authedUser.name && (!authedUser.email_addresses||!authedUser.email_addresses.length))){
           authedUser = hydrateFromAuthCheckPayload(data);
           try{ localStorage.setItem('stytch_user', JSON.stringify(authedUser)); }catch{}
-          updateAuthUI();
-          return true;
         }
-      } catch (e) {
-        // ignore and let caller redirect
-      }
-
-      // 3) Nothing worked
-      return false;
+        updateAuthUI();
+        return true;
+      }catch{ return false; }
     }
-
     function updateAuthUI(){
       $('#avatar').textContent = initialsFor(authedUser||{});
       $('#userName').textContent = displayNameFor(authedUser||{}) || 'User';
       $('#userEmail').textContent = (authedUser?.email_addresses?.[0]?.email_address) || '';
     }
-
     function wireAuthButtons(){
       $('#userButton').onclick = () => $('#userMenu').classList.toggle('hidden');
       document.addEventListener('click',(e)=>{
@@ -234,19 +170,17 @@
         if(!m.classList.contains('hidden') && !m.contains(e.target) && !b.contains(e.target)) m.classList.add('hidden');
       });
       $('#signOutBtn').onclick = ()=>{
-        // clear common keys and cookies
-        document.cookie='solara_session_jwt=; Max-Age=0; Path=/';
-        document.cookie='stytch_session_jwt=; Max-Age=0; Path=/';
+        // clear both cookie and local storage tokens
+        document.cookie='solara_session_jwt=; Max-Age=0; Path=/; SameSite=Lax';
+        document.cookie='stytch_session_jwt=; Max-Age=0; Path=/; SameSite=Lax';
         localStorage.removeItem('stytch_session_jwt');
-        localStorage.removeItem('solara_session_jwt');
         localStorage.removeItem('stytch_user');
-        // If Stytch has a logout endpoint you should call it; otherwise redirect to sign-in
         location.href='sign-in.html';
       };
     }
 
     // ===== UTIL =====
-    const escapeHtml = (s='') => s.replace(/[&<>\"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'' :'&#39;'}[m]||m));
+    const escapeHtml = (s='') => s.replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[m]||m));
     const timeAgo = (iso) => {
       const d=new Date(iso); const diff=(Date.now()-d.getTime())/1000;
       if(diff<60) return `${Math.floor(diff)}s ago`;
@@ -261,7 +195,33 @@
       setTimeout(()=>el.classList.add('hidden'),3500);
     }
 
-    async function apiGET(path){ return api(path, { method: 'GET' }); }
+    // ===== API wrapper (fixed: do not pre-emptively redirect; include credentials) =====
+    async function api(path, opts = {}) {
+      const token = getJWT();
+      const headers = Object.assign({}, opts.headers || {});
+      if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch(`${base()}${path}`, {
+        ...opts,
+        mode: 'cors',
+        credentials: 'include',
+        headers
+      });
+
+      if (res.status === 401) { location.href = 'sign-in.html'; return null; }
+      if (res.status === 500) {
+        try {
+          const b = await res.clone().json();
+          if ((b?.error || '').toLowerCase().includes('unauthorized')) { location.href = 'sign-in.html'; return null; }
+        } catch {}
+      }
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(`API ${res.status}: ${txt}`);
+      }
+      return res;
+    }
 
     function cardSkeleton(){
       return `<article class="rounded-2xl border border-gray-200 dark:border-gray-800 p-4 bg-white dark:bg-gray-950">
@@ -300,16 +260,8 @@
       const grid=$('#grid');
       grid.innerHTML = Array.from({length:6}).map(cardSkeleton).join('');
       try{
-        const res = await api('/workspaces', { method: 'GET', skipAutoRedirect: true });
-        if (!res) return; // api handles redirects
-        // If we got a 401 with no token, try cookie path explicitly
-        if (res.status === 401) {
-          // try cookie-based check via auth/check
-          const ok = await verifySessionAndHydrate();
-          if (!ok) { location.href='sign-in.html'; return; }
-          // retry workspaces now that user is hydrated
-        }
-        const data = await res.json(); const items = data.workspaces || [];
+        const res=await api('/workspaces'); if(!res) return;
+        const data=await res.json(); const items=data.workspaces||[];
         localStorage.setItem('solara_ws_cache', JSON.stringify(items));
         if(!items.length){
           $('#empty').classList.remove('hidden'); grid.innerHTML='';
