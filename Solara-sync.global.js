@@ -1,169 +1,70 @@
-<!-- Solara v10.2.1 — stitchable HTML that loads solara-sync.global.js -->
-<!DOCTYPE html>
-<html lang="en" class="h-full">
-<head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-  <title>Solara – Adaptive Workspace</title>
-  <!-- External libs (keep here) -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-  <style>
-    .drag-over{ background:rgba(99,102,241,.08); outline:2px dashed #6366f1; outline-offset:-2px }
-    .menu-card{ box-shadow:0 10px 20px rgba(0,0,0,.08) }
-    .editable{ outline:none; min-height:1.5rem }
-    .dragging{ opacity:.6; transform:rotate(.4deg) }
-    .drop-indicator{ height:.5rem; border-radius:.25rem; background:rgba(99,102,241,.45); margin:.25rem 0; display:none }
-    .show-drop .drop-indicator{ display:block }
-    .date-badge{ font-variant-numeric: tabular-nums }
-    .presence-dot{ position:absolute; right:-2px; bottom:-2px; width:10px; height:10px; border-radius:999px; background:#10b981; border:2px solid white }
-    .avatar{ position:relative }
-    footer .slot{ min-width: 0 }
-  </style>
-</head>
-<body class="flex flex-col min-h-screen bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">
+// solara-sync.global.js
+// Global (non-module) version of the sync utilities so the HTML can include it with a plain <script src="...">
+// Exposes window.SolaraSync = { CONFIG, apiUrl, apiFetch, safeJson, RealtimeWs, OpSender, SyncClient }
+(function(){
+  const CONFIG = {
+    API_BASE: 'https://shy-smoke-ab8e.justinbhalla28.workers.dev/',
+    PENDING_OPS_KEY: 'solara:pendingOps',
+    CLIENT_ID_KEY: 'solara:clientId',
+    LAST_SEQ_KEY: 'solara:lastSeq',
+    PING_INTERVAL: 10000,
+    PRESENCE_POLL: 5000,
+    SYNC_POLL_MS: 1500,
+  };
 
-<!-- Workspace notice -->
-<div id="wsBanner" class="hidden bg-amber-50 text-amber-900 border-b border-amber-200 px-6 py-2 text-sm">
-  No workspace selected. <a class="underline font-medium" href="workspace.html">Go to Workspaces</a>
-</div>
+  function apiUrl(path){ const base = CONFIG.API_BASE.replace(/\/+$/,''); return base + '/' + String(path||'').replace(/^\/+/, ''); }
+  async function apiFetch(path, opts={}){ const headers = Object.assign({'Content-Type':'application/json'}, opts.headers||{}); const cfg = Object.assign({}, opts); cfg.headers = headers; cfg.credentials = 'include'; return fetch(apiUrl(path), cfg); }
+  function safeJson(res){ try{ return res.ok? res.json().catch(()=>null) : null; }catch(e){ return null; } }
 
-<!-- Header -->
-<header class="flex justify-between items-center px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
-  <div class="flex items-center gap-3">
-    <a id="workspacesLink" href="workspace.html" class="w-9 h-9 rounded-xl bg-indigo-600/10 text-indigo-600 flex items-center justify-center hover:bg-indigo-600/20" title="Back to Workspaces">🔷</a>
-    <div>
-      <h1 class="text-3xl font-bold tracking-tight">Solara</h1>
-      <p class="text-sm text-gray-500 dark:text-gray-400">Part of the ZLG Product Suite</p>
-    </div>
-  </div>
+  class RealtimeWs {
+    constructor({ wsUrl, workspaceId, onMessage, onOpen, clientId, sessionJWT }={}){
+      this.wsUrl = wsUrl; this.workspaceId = workspaceId; this.onMessage = onMessage||(()=>{}); this.onOpen = onOpen||(()=>{});
+      this.clientId = clientId || localStorage.getItem(CONFIG.CLIENT_ID_KEY) || RealtimeWs._genId(); localStorage.setItem(CONFIG.CLIENT_ID_KEY,this.clientId);
+      this.sessionJWT = sessionJWT || null; this.ws = null; this.backoff = 1000; this.maxBackoff = 30000; this.shouldReconnect = true;
+      this.connect();
+    }
+    static _genId(){ return 'c_'+Math.random().toString(36).slice(2,10); }
+    connect(){ try{ this.ws = new WebSocket(this.wsUrl); this.ws.addEventListener('open', ()=>{ this.backoff=1000; this.onOpen(); this._hello(); }); this.ws.addEventListener('message', ev=>{ let msg; try{ msg=JSON.parse(ev.data); }catch(e){ return; } this.onMessage(msg); }); this.ws.addEventListener('close', ()=>{ if(!this.shouldReconnect) return; setTimeout(()=>this.connect(), this.backoff); this.backoff = Math.min(this.backoff*1.5,this.maxBackoff); }); this.ws.addEventListener('error', ()=>{ try{ this.ws.close(); }catch{} }); }catch(e){ setTimeout(()=>this.connect(), this.backoff); this.backoff=Math.min(this.backoff*1.5,this.maxBackoff); } }
+    _hello(){ const lastSeq = Number(localStorage.getItem(CONFIG.LAST_SEQ_KEY)||0); const payload = { type:'hello', ws:this.workspaceId, clientId:this.clientId, lastSeq, token:this.sessionJWT }; this.send(payload); }
+    send(obj){ try{ if(this.ws && this.ws.readyState===1){ this.ws.send(JSON.stringify(obj)); return true; } }catch(e){} return false; }
+    stop(){ this.shouldReconnect=false; try{ this.ws.close(); }catch{} }
+  }
 
-  <div class="flex items-center gap-4">
-    <!-- Presence -->
-    <div class="relative">
-      <button id="presenceBtn" class="flex -space-x-2 items-center">
-        <span id="presenceAvatars" class="flex -space-x-2"></span>
-        <span id="presenceCount" class="ml-2 text-xs text-gray-500"></span>
-      </button>
-      <div id="presenceTooltip" class="hidden absolute right-0 mt-2 w-64 rounded-xl menu-card bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 p-3 text-sm shadow">
-        <div class="font-semibold mb-2">Online now</div>
-        <div id="presenceList" class="space-y-1 max-h-56 overflow-auto"></div>
-      </div>
-    </div>
+  class OpSender{
+    constructor(sendFn, { flushMs=120, maxBatch=40, persistKey=CONFIG.PENDING_OPS_KEY }={}){
+      this.sendFn = sendFn; this.flushMs = flushMs; this.maxBatch = maxBatch; this.persistKey = persistKey; this.buffer = [];
+      try{ const raw = localStorage.getItem(this.persistKey); if(raw){ const arr = JSON.parse(raw); if(Array.isArray(arr)) this.buffer.push(...arr); } }catch(e){}
+      this.timer = null; this.interval = setInterval(()=>this.flush(), 500);
+    }
+    push(op){ this.buffer.push(op); this._persist(); if(!this.timer) this.timer = setTimeout(()=>this.flush(), this.flushMs); if(this.buffer.length>=this.maxBatch) this.flush(); }
+    flush(){ clearTimeout(this.timer); this.timer=null; if(!this.buffer.length) return; const chunk=this.buffer.splice(0,this.maxBatch); const packet={ type:'ops', ops:chunk, ts:Date.now() }; const ok = this.sendFn(packet); if(!ok){ this.buffer.unshift(...chunk); } else { this._persist(); } }
+    _persist(){ try{ localStorage.setItem(this.persistKey, JSON.stringify(this.buffer)); }catch(e){} }
+    close(){ clearInterval(this.interval); clearTimeout(this.timer); this.flush(); }
+  }
 
-    <!-- User -->
-    <div id="userArea" class="relative">
-      <button id="userButton" class="flex items-center gap-2 px-3 py-2 rounded-full border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 transition">
-        <span id="avatar" class="inline-flex h-7 w-7 items-center justify-center rounded-full bg-indigo-600 text-white text-xs font-semibold">?</span>
-        <span id="userName" class="text-sm font-medium">User</span>
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-70" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"/></svg>
-      </button>
-      <div id="userMenu" class="hidden absolute right-0 mt-2 w-56 rounded-xl menu-card bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 overflow-hidden">
-        <div class="px-4 py-3 text-sm">
-          <div id="userEmail" class="text-gray-600 dark:text-gray-300"></div>
-        </div>
-        <div class="border-t border-gray-100 dark:border-gray-700"></div>
-        <button id="addUserBtn" class="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-700">Add user…</button>
-        <button id="signOutBtn" class="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20">Sign out</button>
-      </div>
-    </div>
-  </div>
-</header>
+  class SyncClient{
+    constructor({ workspaceId, sessionJWT=null, onUpdate=null }={}){
+      this.workspaceId = workspaceId; this.sessionJWT=sessionJWT; this.onUpdate = onUpdate||(()=>{});
+      this.clientId = localStorage.getItem(CONFIG.CLIENT_ID_KEY) || RealtimeWs._genId(); localStorage.setItem(CONFIG.CLIENT_ID_KEY,this.clientId);
+      this.lastSeq = Number(localStorage.getItem(CONFIG.LAST_SEQ_KEY)||0);
+      this.realtime = null; this.opSender = null; this.wsConnected=false; this.mode='v10';
+    }
+    async init(){ try{ const r = await apiFetch(`state?workspace_id=${encodeURIComponent(this.workspaceId)}`); if(r.ok) this.mode='v11'; else this.mode='v10'; }catch(e){ this.mode='v10'; }
+      const live = this._liveUrl(); if(live){ this.realtime = new RealtimeWs({ wsUrl: live, workspaceId: this.workspaceId, clientId: this.clientId, sessionJWT: this.sessionJWT, onMessage: msg=>this._handleMsg(msg), onOpen: ()=>this._onOpen() }); this.opSender = new OpSender(pkt=>this.realtime.send(pkt)); }
+      // start presence poll/beat
+      this.presenceInterval = setInterval(()=>{ apiFetch('presence/beat',{ method:'POST', body: JSON.stringify({ workspace_id:this.workspaceId }) }).catch(()=>{}); }, CONFIG.PING_INTERVAL);
+      this.presencePoll = setInterval(async ()=>{ try{ const r = await apiFetch(`presence?workspace_id=${encodeURIComponent(this.workspaceId)}`); if(!r.ok) return; const j = await r.json().catch(()=>({online:[]})); this.onUpdate({ type:'presence/poll', data:j.online||[] }); }catch(e){} }, CONFIG.PRESENCE_POLL);
+    }
+    _liveUrl(){ try{ const u = new URL(CONFIG.API_BASE); u.pathname = (u.pathname.replace(/\/+$/,'') + '/live').replace(/\/\/{2,}/g,'/'); u.search = `?ws=${encodeURIComponent(this.workspaceId)}&token=${encodeURIComponent(this.sessionJWT||'')}`; u.protocol = u.protocol.replace('http','ws'); return u.toString(); }catch(e){ return null; } }
+    _onOpen(){ this.wsConnected=true; if(this.opSender) this.opSender.flush(); }
+    _handleMsg(msg){ if(!msg||!msg.type) return; if(msg.type==='ops' && msg.seq){ localStorage.setItem(CONFIG.LAST_SEQ_KEY, String(msg.seq)); this.lastSeq = Number(msg.seq); } this.onUpdate(msg); }
+    sendOp(op){ op.op_id = op.op_id || ('op_'+Math.random().toString(36).slice(2,10)); op.client_id = this.clientId; op.ts = Date.now(); if(this.wsConnected && this.realtime){ try{ this.realtime.send({ type:'op:append', ws:this.workspaceId, op }); return true; }catch(e){} }
+      apiFetch('ops', { method:'POST', body: JSON.stringify({ workspace_id: this.workspaceId, op }) }).catch(()=>{});
+      return false;
+    }
+    stop(){ if(this.realtime) this.realtime.stop(); if(this.opSender) this.opSender.close(); clearInterval(this.presenceInterval); clearInterval(this.presencePoll); }
+  }
 
-<!-- Nav -->
-<nav class="flex items-center justify-between px-6 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm font-medium">
-  <div class="flex items-center gap-6">
-    <button class="flex items-center gap-2 text-indigo-600 dark:text-indigo-400 font-semibold">
-      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M3 3h14v2H3V3zm0 4h9v2H3V7zm0 4h14v2H3v-2zm0 4h9v2H3v-2z"/></svg>
-      <span>Tasks</span>
-    </button>
-    <button id="reportsLink" class="flex items-center gap-2 text-gray-700 dark:text-gray-200 hover:text-indigo-600">
-      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3v18h18M7 16v-4m4 4V8m4 8V5"/></svg>
-      <span>Reports</span>
-    </button>
-  </div>
-  <div class="flex items-center gap-3">
-    <button id="clearBtn" title="Clear all tasks in current tab" class="p-2 rounded-full bg-red-100 text-red-600 hover:bg-red-200 transition-all">
-      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m0 0A2.99 2.99 0 017 6h10a2.99 2.99 0 012.418 3H19v10a2 2 0 01-2 2H7a2 2 0 01-2-2V9h.582zM10 11v6m4-6v6"/></svg>
-    </button>
-    <button id="newTaskBtn" class="px-4 py-1.5 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-500 shadow transition">+</button>
-  </div>
-</nav>
-
-<!-- Board -->
-<main class="p-6 flex-1 overflow-y-auto">
-  <div id="board" class="grid grid-cols-1 md:grid-cols-3 gap-6">
-    <div id="todo" class="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg shadow-sm" data-col="todo">
-      <h2 class="text-lg font-semibold mb-2">To Do</h2><div class="drop-indicator"></div>
-    </div>
-    <div id="inprogress" class="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg shadow-sm" data-col="inprogress">
-      <h2 class="text-lg font-semibold mb-2">In Progress</h2><div class="drop-indicator"></div>
-    </div>
-    <div id="done" class="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg shadow-sm" data-col="done">
-      <h2 class="text-lg font-semibold mb-2">Done</h2><div class="drop-indicator"></div>
-    </div>
-  </div>
-</main>
-
-<!-- Footer -->
-<div class="sticky bottom-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 z-50">
-  <div class="flex items-center justify-between px-6 py-3 overflow-x-auto">
-    <div class="flex items-center gap-2 w-full overflow-x-auto px-1 py-1">
-      <div id="tabs" class="flex gap-2 min-w-max"></div>
-      <button id="addTabBtn" title="Add Tab" class="p-2 rounded-full bg-green-100 hover:bg-green-200 text-green-700 transition duration-150 shadow-sm border border-green-200">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-      </button>
-    </div>
-    <div class="flex items-center gap-1">
-      <button id="manageBtn" class="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 transition" title="Manage members">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.57-.906 3.435.96 2.53 2.53a1.724 1.724 0 001.065 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.906 1.57-.96 3.435-2.53 2.53a1.724 1.724 0 00-2.573 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.57.906-3.435-.96-2.53-2.53A1.724 1.724 0 003.087 13.9c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.906-1.57.96-3.435 2.53-2.53.98.565 2.229.11 2.642-1.13zM12 9a3 3 0 110 6 3 3 0 010-6z"/></svg>
-      </button>
-      <button id="exportBtn" class="ml-1 p-2 rounded-full hover:bg-indigo-100 text-indigo-600 transition" title="Download Board">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 16l4-5h-3V4h-2v7H8l4 5zm-7 4h14v-2H5v2z"/></svg>
-      </button>
-    </div>
-  </div>
-  <footer class="grid grid-cols-3 items-center text-center text-xs text-gray-500 dark:text-gray-400 px-6 py-3 border-t border-gray-200 dark:border-gray-700">
-    <div class="slot text-left truncate">Workspace: <span id="wsName">—</span></div>
-    <div class="slot">© 2025 ZenLock Group (ZLG). All rights reserved.</div>
-    <div class="slot text-right truncate"><span id="lastSynced">Last synced: —</span></div>
-  </footer>
-</div>
-
-  <!-- Members Modal (unchanged behavior) -->
-<div id="membersModal" class="hidden fixed inset-0 z-[60] flex items-center justify-center">
-  <div class="absolute inset-0 bg-black/40" onclick="closeMembers()"></div>
-  <div class="relative w-full max-w-lg rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-5 shadow-xl">
-    <div class="flex items-center justify-between mb-3">
-      <h3 class="text-lg font-semibold">Workspace Members</h3>
-      <button class="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800" onclick="closeMembers()" title="Close">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-      </button>
-    </div>
-    <div class="flex gap-2 mb-3">
-      <input id="inviteEmail" type="email" placeholder="name@example.com" class="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm"/>
-      <button id="inviteBtn" class="px-3 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 text-sm">Invite</button>
-    </div>
-    <div id="membersList" class="divide-y divide-gray-200 dark:divide-gray-700"></div>
-  </div>
-</div>
-
-<!-- Load the global sync script (stitchable piece) -->
-<script src="./solara-sync.global.js"></script>
-
-<script>
-// Use the global SolaraSync provided by solara-sync.global.js
-const { CONFIG, apiFetch: globalApiFetch } = window.SolaraSync || { CONFIG: { API_BASE: '' }, apiFetch: null };
-const API_BASE = CONFIG.API_BASE || '';
-async function apiFetch(path, opts={}){ if(globalApiFetch) return globalApiFetch(path, opts); const headers = Object.assign({'Content-Type':'application/json'}, opts.headers||{}); if (sessionJWT) headers['Authorization'] = `Bearer ${sessionJWT}`; return fetch((API_BASE.replace(/\/+$/,'') + '/' + String(path||'').replace(/^\/+/,'')), { credentials:'include', ...opts, headers }); }
-
-/* ---------------- CONFIG ---------------- */
-// API_BASE is now taken from global CONFIG; keep for backward compatibility
-// rest of the inline client script follows unchanged but uses apiFetch()
-
-</script>
-
-<!-- The rest of your large inline client script (unchanged) should go here. -->
-
-</body>
-</html>
+  // attach to global
+  window.SolaraSync = { CONFIG, apiUrl, apiFetch, safeJson, RealtimeWs, OpSender, SyncClient };
+})();
