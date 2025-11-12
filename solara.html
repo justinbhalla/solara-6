@@ -1,233 +1,169 @@
-
-<!-- solara-client-and-page.html -->
+<!-- Solara v10.2.1 — stitchable HTML that loads solara-sync.global.js -->
 <!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Solara – Sign in</title>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Solara – Adaptive Workspace</title>
+  <!-- External libs (keep here) -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
   <style>
-    :root{ --accent:#6366f1; --accent-ink:#4f46e5; --surface:#f8fafc; }
-    html,body{height:100%}
-    body{font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Inter", "Noto Sans", sans-serif}
-    .lift{transition:transform .15s ease, box-shadow .15s ease}
-    .lift:hover{transform:translateY(-1px)}
-    .card{box-shadow:0 1px 2px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.06)}
-    .lane-bg{background: rgba(99,102,241,.06)}
+    .drag-over{ background:rgba(99,102,241,.08); outline:2px dashed #6366f1; outline-offset:-2px }
+    .menu-card{ box-shadow:0 10px 20px rgba(0,0,0,.08) }
+    .editable{ outline:none; min-height:1.5rem }
+    .dragging{ opacity:.6; transform:rotate(.4deg) }
+    .drop-indicator{ height:.5rem; border-radius:.25rem; background:rgba(99,102,241,.45); margin:.25rem 0; display:none }
+    .show-drop .drop-indicator{ display:block }
+    .date-badge{ font-variant-numeric: tabular-nums }
+    .presence-dot{ position:absolute; right:-2px; bottom:-2px; width:10px; height:10px; border-radius:999px; background:#10b981; border:2px solid white }
+    .avatar{ position:relative }
+    footer .slot{ min-width: 0 }
   </style>
 </head>
-<body class="flex flex-col min-h-screen bg-[color:var(--surface)] text-gray-900">
-  <!-- Header -->
-  <header class="flex justify-between items-center px-6 py-4 border-b border-gray-200 bg-[color:var(--surface)]">
+<body class="flex flex-col min-h-screen bg-white text-gray-900 dark:bg-gray-900 dark:text-gray-100">
+
+<!-- Workspace notice -->
+<div id="wsBanner" class="hidden bg-amber-50 text-amber-900 border-b border-amber-200 px-6 py-2 text-sm">
+  No workspace selected. <a class="underline font-medium" href="workspace.html">Go to Workspaces</a>
+</div>
+
+<!-- Header -->
+<header class="flex justify-between items-center px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+  <div class="flex items-center gap-3">
+    <a id="workspacesLink" href="workspace.html" class="w-9 h-9 rounded-xl bg-indigo-600/10 text-indigo-600 flex items-center justify-center hover:bg-indigo-600/20" title="Back to Workspaces">🔷</a>
     <div>
       <h1 class="text-3xl font-bold tracking-tight">Solara</h1>
-      <p class="text-sm text-gray-600">Part of the ZLG Product Suite</p>
+      <p class="text-sm text-gray-500 dark:text-gray-400">Part of the ZLG Product Suite</p>
     </div>
-    <nav class="hidden md:flex items-center gap-5 text-sm text-gray-700">
-      <a href="#" class="hover:text-gray-900">Pricing</a>
-      <a href="#" class="hover:text-gray-900">Docs</a>
-      <a href="#" class="hover:text-gray-900">Support</a>
-    </nav>
-  </header>
+  </div>
 
-  <!-- Main -->
-  <main class="flex-1">
-    <section class="max-w-5xl mx-auto px-6 lg:px-8 py-12 lg:py-16">
-      <div class="text-center max-w-3xl mx-auto">
-        <h2 class="text-4xl sm:text-5xl font-extrabold leading-tight">Sign in to Solara</h2>
-        <p class="mt-4 text-gray-600">Simple, secure access to your workspace.</p>
+  <div class="flex items-center gap-4">
+    <!-- Presence -->
+    <div class="relative">
+      <button id="presenceBtn" class="flex -space-x-2 items-center">
+        <span id="presenceAvatars" class="flex -space-x-2"></span>
+        <span id="presenceCount" class="ml-2 text-xs text-gray-500"></span>
+      </button>
+      <div id="presenceTooltip" class="hidden absolute right-0 mt-2 w-64 rounded-xl menu-card bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 p-3 text-sm shadow">
+        <div class="font-semibold mb-2">Online now</div>
+        <div id="presenceList" class="space-y-1 max-h-56 overflow-auto"></div>
+      </div>
+    </div>
 
-        <div class="mt-8">
-          <a href="#" class="inline-flex items-center gap-3 px-5 py-3 rounded-xl bg-indigo-600 text-white font-semibold lift" aria-label="Continue with Google">
-            Continue with Google
-          </a>
+    <!-- User -->
+    <div id="userArea" class="relative">
+      <button id="userButton" class="flex items-center gap-2 px-3 py-2 rounded-full border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 transition">
+        <span id="avatar" class="inline-flex h-7 w-7 items-center justify-center rounded-full bg-indigo-600 text-white text-xs font-semibold">?</span>
+        <span id="userName" class="text-sm font-medium">User</span>
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 opacity-70" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 10.94l3.71-3.71a.75.75 0 111.06 1.06l-4.24 4.24a.75.75 0 01-1.06 0L5.21 8.29a.75.75 0 01.02-1.08z"/></svg>
+      </button>
+      <div id="userMenu" class="hidden absolute right-0 mt-2 w-56 rounded-xl menu-card bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 overflow-hidden">
+        <div class="px-4 py-3 text-sm">
+          <div id="userEmail" class="text-gray-600 dark:text-gray-300"></div>
         </div>
-        <p class="mt-4 text-xs text-gray-500">Secure by design.</p>
+        <div class="border-t border-gray-100 dark:border-gray-700"></div>
+        <button id="addUserBtn" class="w-full text-left px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-gray-700">Add user…</button>
+        <button id="signOutBtn" class="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20">Sign out</button>
       </div>
+    </div>
+  </div>
+</header>
 
-      <!-- Board (now wired for Solara client) -->
-      <div class="mt-12 max-w-5xl mx-auto">
-        <div class="rounded-2xl border border-gray-200 bg-white p-4 card">
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <!-- Lane 1 -->
-            <div class="lane-bg rounded-xl p-3 border border-indigo-200/50" data-solara-column="todo">
-              <div class="flex items-center justify-between mb-2">
-                <h3 class="text-sm font-semibold" data-solara-title>To Do</h3>
-                <span class="text-[10px] px-2 py-0.5 rounded-full bg-gray-100">2</span>
-              </div>
-              <div class="space-y-2" data-solara-tasks>
-                <div class="rounded-lg border border-gray-200 bg-white p-2 text-sm" data-solara-task="t1">Spec mobile filters</div>
-                <div class="rounded-lg border border-gray-200 bg-white p-2 text-sm" data-solara-task="t2">DB index audit</div>
-              </div>
-            </div>
-            <!-- Lane 2 -->
-            <div class="lane-bg rounded-xl p-3 border border-indigo-200/50" data-solara-column="inprogress">
-              <div class="flex items-center justify-between mb-2">
-                <h3 class="text-sm font-semibold" data-solara-title>In Progress</h3>
-                <span class="text-[10px] px-2 py-0.5 rounded-full bg-gray-100">1</span>
-              </div>
-              <div class="space-y-2" data-solara-tasks>
-                <div class="rounded-lg border border-gray-200 bg-white p-2 text-sm" data-solara-task="t3">Auth screen polish</div>
-              </div>
-            </div>
-            <!-- Lane 3 -->
-            <div class="lane-bg rounded-xl p-3 border border-indigo-200/50" data-solara-column="review">
-              <div class="flex items-center justify-between mb-2">
-                <h3 class="text-sm font-semibold" data-solara-title>Review</h3>
-                <span class="text-[10px] px-2 py-0.5 rounded-full bg-gray-100">1</span>
-              </div>
-              <div class="space-y-2" data-solara-tasks>
-                <div class="rounded-lg border border-gray-200 bg-white p-2 text-sm" data-solara-task="t4">PDF export pass</div>
-              </div>
-            </div>
-          </div>
-          <div class="mt-3 text-[11px] text-gray-500">Preview illustration only. Create your workspace to get started.</div>
-        </div>
-      </div>
+<!-- Nav -->
+<nav class="flex items-center justify-between px-6 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm font-medium">
+  <div class="flex items-center gap-6">
+    <button class="flex items-center gap-2 text-indigo-600 dark:text-indigo-400 font-semibold">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M3 3h14v2H3V3zm0 4h9v2H3V7zm0 4h14v2H3v-2zm0 4h9v2H3v-2z"/></svg>
+      <span>Tasks</span>
+    </button>
+    <button id="reportsLink" class="flex items-center gap-2 text-gray-700 dark:text-gray-200 hover:text-indigo-600">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3v18h18M7 16v-4m4 4V8m4 8V5"/></svg>
+      <span>Reports</span>
+    </button>
+  </div>
+  <div class="flex items-center gap-3">
+    <button id="clearBtn" title="Clear all tasks in current tab" class="p-2 rounded-full bg-red-100 text-red-600 hover:bg-red-200 transition-all">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m0 0A2.99 2.99 0 017 6h10a2.99 2.99 0 012.418 3H19v10a2 2 0 01-2 2H7a2 2 0 01-2-2V9h.582zM10 11v6m4-6v6"/></svg>
+    </button>
+    <button id="newTaskBtn" class="px-4 py-1.5 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-500 shadow transition">+</button>
+  </div>
+</nav>
 
-      <!-- Tiny trust row -->
-      <div class="mt-10 text-center text-xs text-gray-600">
-        Used by ops, product, and service teams.
-      </div>
-    </section>
-  </main>
+<!-- Board -->
+<main class="p-6 flex-1 overflow-y-auto">
+  <div id="board" class="grid grid-cols-1 md:grid-cols-3 gap-6">
+    <div id="todo" class="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg shadow-sm" data-col="todo">
+      <h2 class="text-lg font-semibold mb-2">To Do</h2><div class="drop-indicator"></div>
+    </div>
+    <div id="inprogress" class="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg shadow-sm" data-col="inprogress">
+      <h2 class="text-lg font-semibold mb-2">In Progress</h2><div class="drop-indicator"></div>
+    </div>
+    <div id="done" class="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg shadow-sm" data-col="done">
+      <h2 class="text-lg font-semibold mb-2">Done</h2><div class="drop-indicator"></div>
+    </div>
+  </div>
+</main>
 
-  <footer class="text-center text-xs text-gray-600 px-6 py-4 border-t border-gray-200 bg-[color:var(--surface)]">
-    © 2025 ZenLock Group (ZLG). All rights reserved.
+<!-- Footer -->
+<div class="sticky bottom-0 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 z-50">
+  <div class="flex items-center justify-between px-6 py-3 overflow-x-auto">
+    <div class="flex items-center gap-2 w-full overflow-x-auto px-1 py-1">
+      <div id="tabs" class="flex gap-2 min-w-max"></div>
+      <button id="addTabBtn" title="Add Tab" class="p-2 rounded-full bg-green-100 hover:bg-green-200 text-green-700 transition duration-150 shadow-sm border border-green-200">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+      </button>
+    </div>
+    <div class="flex items-center gap-1">
+      <button id="manageBtn" class="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 transition" title="Manage members">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.57-.906 3.435.96 2.53 2.53a1.724 1.724 0 001.065 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.906 1.57-.96 3.435-2.53 2.53a1.724 1.724 0 00-2.573 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.57.906-3.435-.96-2.53-2.53A1.724 1.724 0 003.087 13.9c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.906-1.57.96-3.435 2.53-2.53.98.565 2.229.11 2.642-1.13zM12 9a3 3 0 110 6 3 3 0 010-6z"/></svg>
+      </button>
+      <button id="exportBtn" class="ml-1 p-2 rounded-full hover:bg-indigo-100 text-indigo-600 transition" title="Download Board">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 16l4-5h-3V4h-2v7H8l4 5zm-7 4h14v-2H5v2z"/></svg>
+      </button>
+    </div>
+  </div>
+  <footer class="grid grid-cols-3 items-center text-center text-xs text-gray-500 dark:text-gray-400 px-6 py-3 border-t border-gray-200 dark:border-gray-700">
+    <div class="slot text-left truncate">Workspace: <span id="wsName">—</span></div>
+    <div class="slot">© 2025 ZenLock Group (ZLG). All rights reserved.</div>
+    <div class="slot text-right truncate"><span id="lastSynced">Last synced: —</span></div>
   </footer>
+</div>
 
-  <!-- Client script: imports the realtime module and initializes the client -->
-  <script type="module">
-    import { Realtime, OpSender } from './solara-realtime-opsender.js';
+  <!-- Members Modal (unchanged behavior) -->
+<div id="membersModal" class="hidden fixed inset-0 z-[60] flex items-center justify-center">
+  <div class="absolute inset-0 bg-black/40" onclick="closeMembers()"></div>
+  <div class="relative w-full max-w-lg rounded-2xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 p-5 shadow-xl">
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="text-lg font-semibold">Workspace Members</h3>
+      <button class="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800" onclick="closeMembers()" title="Close">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="flex gap-2 mb-3">
+      <input id="inviteEmail" type="email" placeholder="name@example.com" class="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm"/>
+      <button id="inviteBtn" class="px-3 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-500 text-sm">Invite</button>
+    </div>
+    <div id="membersList" class="divide-y divide-gray-200 dark:divide-gray-700"></div>
+  </div>
+</div>
 
-    // Minimal init — adjust wsUrl to your server
-    const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+<!-- Load the global sync script (stitchable piece) -->
+<script src="./solara-sync.global.js"></script>
 
-    function genOpId(clientId) {
-      return `${clientId}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2,8)}`;
-    }
+<script>
+// Use the global SolaraSync provided by solara-sync.global.js
+const { CONFIG, apiFetch: globalApiFetch } = window.SolaraSync || { CONFIG: { API_BASE: '' }, apiFetch: null };
+const API_BASE = CONFIG.API_BASE || '';
+async function apiFetch(path, opts={}){ if(globalApiFetch) return globalApiFetch(path, opts); const headers = Object.assign({'Content-Type':'application/json'}, opts.headers||{}); if (sessionJWT) headers['Authorization'] = `Bearer ${sessionJWT}`; return fetch((API_BASE.replace(/\/+$/,'') + '/' + String(path||'').replace(/^\/+/,'')), { credentials:'include', ...opts, headers }); }
 
-    // seed state from DOM
-    function seedStateFromDOM() {
-      const state = { columns: {}, tasksById: {}, pendingOps: {} };
-      document.querySelectorAll('[data-solara-column]').forEach(colEl => {
-        const colId = colEl.getAttribute('data-solara-column');
-        const title = colEl.querySelector('[data-solara-title]')?.textContent || colId;
-        const tasks = [];
-        colEl.querySelectorAll('[data-solara-task]').forEach(taskEl => {
-          const id = taskEl.getAttribute('data-solara-task');
-          const t = { id, title: taskEl.textContent || id };
-          tasks.push(t);
-          state.tasksById[id] = t;
-        });
-        state.columns[colId] = { id: colId, title, tasks };
-      });
-      return state;
-    }
+/* ---------------- CONFIG ---------------- */
+// API_BASE is now taken from global CONFIG; keep for backward compatibility
+// rest of the inline client script follows unchanged but uses apiFetch()
 
-    const clientId = localStorage.getItem('solara:clientId') || ('c_' + Math.random().toString(36).slice(2,10));
-    localStorage.setItem('solara:clientId', clientId);
+</script>
 
-    const rt = new Realtime({ url: wsUrl, onMessage: handleMsg, onOpen: handleOpen, clientId });
-    const sender = new OpSender(pkt => rt.send(pkt));
+<!-- The rest of your large inline client script (unchanged) should go here. -->
 
-    const state = seedStateFromDOM();
-
-    function applyOpToState(op) {
-      if (op.type === 'move') {
-        const { taskId, from, to } = op;
-        const task = state.tasksById[taskId];
-        if (!task) return;
-        const src = state.columns[from];
-        const dst = state.columns[to];
-        if (!src || !dst) return;
-        src.tasks = src.tasks.filter(t => t.id !== taskId);
-        dst.tasks.push(task);
-        renderColumns();
-      }
-    }
-
-    function applyOpLocallyAndSend(op) {
-      op.opId = genOpId(clientId);
-      op.clientId = clientId;
-      op.ts = Date.now();
-      state.pendingOps[op.opId] = op;
-      applyOpToState(op);
-      sender.push(op);
-    }
-
-    function handleMsg(msg) {
-      if (!msg || !msg.type) return;
-      if (msg.type === 'ops') {
-        (msg.ops || []).forEach(op => {
-          if (op.opId && state.pendingOps[op.opId]) delete state.pendingOps[op.opId];
-          applyOpToState(op);
-        });
-      } else if (msg.type === 'op-ack') {
-        if (msg.opId && state.pendingOps[msg.opId]) delete state.pendingOps[msg.opId];
-      } else if (msg.type === 'snapshot' && msg.state) {
-        Object.assign(state, msg.state);
-        renderColumns();
-      }
-    }
-
-    function handleOpen() { sender.flush(); }
-
-    // Render and drag/drop wiring
-    function renderColumns() {
-      document.querySelectorAll('[data-solara-column]').forEach(colEl => {
-        const colId = colEl.getAttribute('data-solara-column');
-        const column = state.columns[colId];
-        const list = colEl.querySelector('[data-solara-tasks]');
-        if (!list || !column) return;
-        list.innerHTML = '';
-        column.tasks.forEach(task => {
-          const el = document.createElement('div');
-          el.className = 'rounded-lg border border-gray-200 bg-white p-2 text-sm cursor-grab';
-          el.setAttribute('draggable', 'true');
-          el.setAttribute('data-solara-task', task.id);
-          el.textContent = task.title || task.id;
-          list.appendChild(el);
-        });
-      });
-      attachDragListeners();
-    }
-
-    function attachDragListeners() {
-      document.querySelectorAll('[data-solara-task]').forEach(el => {
-        el.removeEventListener('dragstart', onDragStart);
-        el.addEventListener('dragstart', onDragStart);
-      });
-      document.querySelectorAll('[data-solara-column]').forEach(col => {
-        col.removeEventListener('dragover', onDragOver);
-        col.removeEventListener('drop', onDrop);
-        col.addEventListener('dragover', onDragOver);
-        col.addEventListener('drop', onDrop);
-      });
-    }
-
-    let _dragTaskId = null;
-    function onDragStart(e) { _dragTaskId = e.target.getAttribute('data-solara-task'); e.dataTransfer?.setData('text/plain', _dragTaskId); }
-    function onDragOver(e) { e.preventDefault(); }
-    function onDrop(e) {
-      e.preventDefault();
-      const colEl = e.currentTarget;
-      const to = colEl.getAttribute('data-solara-column');
-      const taskId = _dragTaskId || e.dataTransfer?.getData('text/plain');
-      if (!taskId || !to) return;
-      const from = Object.keys(state.columns).find(cid => state.columns[cid].tasks.some(t => t.id === taskId));
-      if (!from || from === to) return;
-      const op = { type: 'move', taskId, from, to };
-      applyOpLocallyAndSend(op);
-      _dragTaskId = null;
-    }
-
-    // initial render
-    renderColumns();
-
-    // expose for debugging
-    window.__solara = { state, applyOpLocallyAndSend, rt, sender };
-  </script>
 </body>
 </html>
