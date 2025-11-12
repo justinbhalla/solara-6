@@ -1,20 +1,12 @@
-// solara-sync-and-init.js
-// Two-piece script for Solara realtime sync (Pragmatic WebSocket + ops + LWW)
-// Piece 1: Realtime + OpSender (transport + batching + reconnect + queue)
-// Piece 2: Client initializer (hooks board UI, optimistic updates, simple move op)
-
-/* --------------------------------------------------------------------------
- * Piece 1: Transport & Sender
- * - Realtime: WebSocket manager with reconnect/backoff, ack handling
- * - OpSender: batches outgoing ops and ensures ordering
- * - Simple in-memory queue + optional localStorage persistence for pending ops
- * -------------------------------------------------------------------------*/
+// solara-realtime-opsender.js
+// Piece A: Realtime WebSocket manager + OpSender batching/persistence
+// Exported: Realtime, OpSender
 
 export class Realtime {
-  constructor({ url, onMessage, onOpen, clientId, authToken }) {
-    this.url = url;
-    this.onMessage = onMessage;
-    this.onOpen = onOpen;
+  constructor({ url, onMessage, onOpen, clientId, authToken } = {}) {
+    this.url = url || 'wss://example.com/ws';
+    this.onMessage = onMessage || (() => {});
+    this.onOpen = onOpen || (() => {});
     this.clientId = clientId || Realtime._genId();
     this.authToken = authToken || null;
 
@@ -23,7 +15,7 @@ export class Realtime {
     this._maxBackoff = 30000;
     this._shouldReconnect = true;
 
-    // last seen seq for catch-up
+    // last seen sequence for catch-up
     this.lastSeenSeq = Number(localStorage.getItem('solara:lastSeenSeq') || 0);
 
     this._connect();
@@ -35,25 +27,24 @@ export class Realtime {
 
   _connect() {
     try {
-      const proto = this.url.startsWith('wss') || this.url.startsWith('ws') ? '' : 'wss://';
       this.ws = new WebSocket(this.url);
 
       this.ws.addEventListener('open', () => {
         this._backoff = 1000;
-        if (this.onOpen) this.onOpen();
-        // announce client and request catch-up
+        this.onOpen();
+        // handshake: send hello requesting ops since lastSeenSeq
         this._sendRaw({ type: 'hello', clientId: this.clientId, lastSeenSeq: this.lastSeenSeq, authToken: this.authToken });
       });
 
       this.ws.addEventListener('message', (ev) => {
         let msg;
         try { msg = JSON.parse(ev.data); } catch (e) { console.warn('invalid msg', ev.data); return; }
-        // persist lastSeenSeq when server sends seqs
+        // update lastSeenSeq if present
         if (msg.seq && msg.type === 'ops') {
-          this.lastSeenSeq = Math.max(this.lastSeenSeq, msg.seq);
+          this.lastSeenSeq = Math.max(this.lastSeenSeq, msg.seq || 0);
           localStorage.setItem('solara:lastSeenSeq', String(this.lastSeenSeq));
         }
-        if (this.onMessage) this.onMessage(msg);
+        this.onMessage(msg);
       });
 
       this.ws.addEventListener('close', () => {
@@ -63,7 +54,6 @@ export class Realtime {
       });
 
       this.ws.addEventListener('error', () => {
-        // trigger close to apply the same reconnect logic
         try { this.ws.close(); } catch (e) {}
       });
     } catch (e) {
@@ -88,22 +78,19 @@ export class Realtime {
   }
 
   send(packet) {
-    // packet shape: { type: 'ops'|'op', ops: [...] }
-    const ok = this._sendRaw(packet);
-    return ok;
+    return this._sendRaw(packet);
   }
 }
 
 export class OpSender {
   constructor(sendFn, { flushMs = 120, maxBatch = 40, persistKey = 'solara:pendingOps' } = {}) {
-    this.sendFn = sendFn; // function(packet) => boolean
+    this.sendFn = sendFn;
     this.buffer = [];
     this.flushMs = flushMs;
     this.timer = null;
     this.maxBatch = maxBatch;
     this.persistKey = persistKey;
 
-    // recover persisted pending ops
     try {
       const raw = localStorage.getItem(this.persistKey);
       if (raw) {
@@ -112,7 +99,6 @@ export class OpSender {
       }
     } catch (e) { /* ignore */ }
 
-    // periodic flush attempt if connection comes up
     this._tryFlushInterval = setInterval(() => this.flush(), 500);
   }
 
@@ -130,7 +116,7 @@ export class OpSender {
     const packet = { type: 'ops', ops: opsToSend, ts: Date.now() };
     const ok = this.sendFn(packet);
     if (!ok) {
-      // send failed, requeue at front
+      // requeue
       this.buffer.unshift(...opsToSend);
     } else {
       this._persist();
@@ -147,197 +133,235 @@ export class OpSender {
     this.flush();
   }
 }
+<!-- solara-client-and-page.html -->
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Solara – Sign in</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root{ --accent:#6366f1; --accent-ink:#4f46e5; --surface:#f8fafc; }
+    html,body{height:100%}
+    body{font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Inter", "Noto Sans", sans-serif}
+    .lift{transition:transform .15s ease, box-shadow .15s ease}
+    .lift:hover{transform:translateY(-1px)}
+    .card{box-shadow:0 1px 2px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.06)}
+    .lane-bg{background: rgba(99,102,241,.06)}
+  </style>
+</head>
+<body class="flex flex-col min-h-screen bg-[color:var(--surface)] text-gray-900">
+  <!-- Header -->
+  <header class="flex justify-between items-center px-6 py-4 border-b border-gray-200 bg-[color:var(--surface)]">
+    <div>
+      <h1 class="text-3xl font-bold tracking-tight">Solara</h1>
+      <p class="text-sm text-gray-600">Part of the ZLG Product Suite</p>
+    </div>
+    <nav class="hidden md:flex items-center gap-5 text-sm text-gray-700">
+      <a href="#" class="hover:text-gray-900">Pricing</a>
+      <a href="#" class="hover:text-gray-900">Docs</a>
+      <a href="#" class="hover:text-gray-900">Support</a>
+    </nav>
+  </header>
 
-/* --------------------------------------------------------------------------
- * Piece 2: Client initializer
- * - initSolaraClient: wires UI actions to local state and op sender
- * - small reducer to apply ops locally (LWW for simple fields)
- * - demo move operation for task movement between lanes
- * -------------------------------------------------------------------------*/
+  <!-- Main -->
+  <main class="flex-1">
+    <section class="max-w-5xl mx-auto px-6 lg:px-8 py-12 lg:py-16">
+      <div class="text-center max-w-3xl mx-auto">
+        <h2 class="text-4xl sm:text-5xl font-extrabold leading-tight">Sign in to Solara</h2>
+        <p class="mt-4 text-gray-600">Simple, secure access to your workspace.</p>
 
-export function initSolaraClient({ boardRoot = document, wsUrl = 'wss://example.com/ws', authToken = null, clientId = null } = {}) {
-  const rt = new Realtime({ url: wsUrl, onMessage: handleMsg, onOpen: handleOpen, clientId, authToken });
-  const sender = new OpSender(pkt => rt.send(pkt));
+        <div class="mt-8">
+          <a href="#" class="inline-flex items-center gap-3 px-5 py-3 rounded-xl bg-indigo-600 text-white font-semibold lift" aria-label="Continue with Google">
+            Continue with Google
+          </a>
+        </div>
+        <p class="mt-4 text-xs text-gray-500">Secure by design.</p>
+      </div>
 
-  // local in-memory state (minimal). Replace with your app state store.
-  const state = {
-    columns: {}, // { columnId: { id, title, tasks: [task] } }
-    tasksById: {},
-    pendingOps: {},
-  };
+      <!-- Board (now wired for Solara client) -->
+      <div class="mt-12 max-w-5xl mx-auto">
+        <div class="rounded-2xl border border-gray-200 bg-white p-4 card">
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <!-- Lane 1 -->
+            <div class="lane-bg rounded-xl p-3 border border-indigo-200/50" data-solara-column="todo">
+              <div class="flex items-center justify-between mb-2">
+                <h3 class="text-sm font-semibold" data-solara-title>To Do</h3>
+                <span class="text-[10px] px-2 py-0.5 rounded-full bg-gray-100">2</span>
+              </div>
+              <div class="space-y-2" data-solara-tasks>
+                <div class="rounded-lg border border-gray-200 bg-white p-2 text-sm" data-solara-task="t1">Spec mobile filters</div>
+                <div class="rounded-lg border border-gray-200 bg-white p-2 text-sm" data-solara-task="t2">DB index audit</div>
+              </div>
+            </div>
+            <!-- Lane 2 -->
+            <div class="lane-bg rounded-xl p-3 border border-indigo-200/50" data-solara-column="inprogress">
+              <div class="flex items-center justify-between mb-2">
+                <h3 class="text-sm font-semibold" data-solara-title>In Progress</h3>
+                <span class="text-[10px] px-2 py-0.5 rounded-full bg-gray-100">1</span>
+              </div>
+              <div class="space-y-2" data-solara-tasks>
+                <div class="rounded-lg border border-gray-200 bg-white p-2 text-sm" data-solara-task="t3">Auth screen polish</div>
+              </div>
+            </div>
+            <!-- Lane 3 -->
+            <div class="lane-bg rounded-xl p-3 border border-indigo-200/50" data-solara-column="review">
+              <div class="flex items-center justify-between mb-2">
+                <h3 class="text-sm font-semibold" data-solara-title>Review</h3>
+                <span class="text-[10px] px-2 py-0.5 rounded-full bg-gray-100">1</span>
+              </div>
+              <div class="space-y-2" data-solara-tasks>
+                <div class="rounded-lg border border-gray-200 bg-white p-2 text-sm" data-solara-task="t4">PDF export pass</div>
+              </div>
+            </div>
+          </div>
+          <div class="mt-3 text-[11px] text-gray-500">Preview illustration only. Create your workspace to get started.</div>
+        </div>
+      </div>
 
-  // small helper to generate opId
-  function genOpId() {
-    return `${rt.clientId}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2,8)}`;
-  }
+      <!-- Tiny trust row -->
+      <div class="mt-10 text-center text-xs text-gray-600">
+        Used by ops, product, and service teams.
+      </div>
+    </section>
+  </main>
 
-  // apply operations locally (LWW on attribute-level using ts)
-  function applyOpToState(op, { authoritative = false } = {}) {
-    // op example: { opId, clientId, type:'move', taskId, from, to, ts }
-    if (op.type === 'move') {
-      const { taskId, from, to } = op;
-      const task = state.tasksById[taskId];
-      if (!task) return;
-      // remove from source column
-      const src = state.columns[from];
-      const dst = state.columns[to];
-      if (!src || !dst) return;
-      // remove
-      src.tasks = src.tasks.filter(t => t.id !== taskId);
-      // append at end of destination
-      dst.tasks.push(task);
-      // reflect DOM change
-      renderColumns();
+  <footer class="text-center text-xs text-gray-600 px-6 py-4 border-t border-gray-200 bg-[color:var(--surface)]">
+    © 2025 ZenLock Group (ZLG). All rights reserved.
+  </footer>
+
+  <!-- Client script: imports the realtime module and initializes the client -->
+  <script type="module">
+    import { Realtime, OpSender } from './solara-realtime-opsender.js';
+
+    // Minimal init — adjust wsUrl to your server
+    const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+
+    function genOpId(clientId) {
+      return `${clientId}:${Date.now().toString(36)}:${Math.random().toString(36).slice(2,8)}`;
     }
 
-    // handle other op types (create/update/delete) as needed
-  }
-
-  // optimistic apply and send
-  function applyOpLocallyAndSend(op) {
-    op.opId = op.opId || genOpId();
-    op.clientId = rt.clientId;
-    op.ts = op.ts || Date.now();
-    // optimistic
-    state.pendingOps[op.opId] = op;
-    applyOpToState(op);
-    sender.push(op);
-  }
-
-  // basic message handler
-  function handleMsg(msg) {
-    if (!msg || !msg.type) return;
-    if (msg.type === 'ops') {
-      // server-sent ops; apply authoritative ones
-      (msg.ops || []).forEach(op => {
-        // if this op matches our pending op, clear it
-        if (op.opId && state.pendingOps[op.opId]) delete state.pendingOps[op.opId];
-        applyOpToState(op, { authoritative: true });
-      });
-    } else if (msg.type === 'op-ack') {
-      // ack for single op
-      if (msg.opId && state.pendingOps[msg.opId]) delete state.pendingOps[msg.opId];
-    } else if (msg.type === 'snapshot') {
-      // full-state snapshot
-      if (msg.state) {
-        // naive replace
-        state.columns = msg.state.columns || {};
-        state.tasksById = msg.state.tasksById || {};
-        renderColumns();
-      }
-    }
-  }
-
-  function handleOpen() {
-    // flush pending ops when socket opens
-    sender.flush();
-  }
-
-  /* -----------------------
-   * DOM wiring
-   * - expects columns in DOM with data-column-id
-   * - expects task elements with data-task-id
-   * - this is intentionally framework-agnostic and minimal
-   * ----------------------*/
-
-  function renderColumns() {
-    // re-render columns from state; minimal approach for static demo
-    const colEls = boardRoot.querySelectorAll('[data-solara-column]');
-    colEls.forEach(colEl => {
-      const colId = colEl.getAttribute('data-solara-column');
-      const column = state.columns[colId];
-      const list = colEl.querySelector('[data-solara-tasks]');
-      if (!list || !column) return;
-      // clear
-      list.innerHTML = '';
-      column.tasks.forEach(task => {
-        const el = document.createElement('div');
-        el.className = 'rounded-lg border border-gray-200 bg-white p-2 text-sm cursor-grab';
-        el.setAttribute('draggable', 'true');
-        el.setAttribute('data-solara-task', task.id);
-        el.textContent = task.title || task.id;
-        list.appendChild(el);
-      });
-    });
-
-    attachDragListeners();
-  }
-
-  function attachDragListeners() {
-    const taskEls = boardRoot.querySelectorAll('[data-solara-task]');
-    taskEls.forEach(el => {
-      el.removeEventListener('dragstart', onDragStart);
-      el.addEventListener('dragstart', onDragStart);
-    });
-
-    const colEls = boardRoot.querySelectorAll('[data-solara-column]');
-    colEls.forEach(col => {
-      col.removeEventListener('dragover', onDragOver);
-      col.removeEventListener('drop', onDrop);
-      col.addEventListener('dragover', onDragOver);
-      col.addEventListener('drop', onDrop);
-    });
-  }
-
-  let _dragTaskId = null;
-  function onDragStart(e) {
-    const id = e.target.getAttribute('data-solara-task');
-    _dragTaskId = id;
-    e.dataTransfer?.setData('text/plain', id);
-  }
-  function onDragOver(e) { e.preventDefault(); }
-  function onDrop(e) {
-    e.preventDefault();
-    const colEl = e.currentTarget;
-    const to = colEl.getAttribute('data-solara-column');
-    const taskId = _dragTaskId || e.dataTransfer?.getData('text/plain');
-    if (!taskId || !to) return;
-
-    // find source column id
-    const from = Object.keys(state.columns).find(cid => state.columns[cid].tasks.some(t => t.id === taskId));
-    if (!from) return;
-    if (from === to) return;
-
-    const op = { type: 'move', taskId, from, to };
-    applyOpLocallyAndSend(op);
-    _dragTaskId = null;
-  }
-
-  /* -----------------------
-   * Initialization helper to seed state from DOM markup
-   * You can also call initSolaraClient with a server snapshot instead
-   * ----------------------*/
-  function seedStateFromDOM() {
-    // expects columns markup like: <div data-solara-column="todo"><div data-solara-tasks>...</div></div>
-    const cols = boardRoot.querySelectorAll('[data-solara-column]');
-    cols.forEach(colEl => {
-      const colId = colEl.getAttribute('data-solara-column');
-      const title = colEl.querySelector('[data-solara-title]')?.textContent || colId;
-      const tasksContainer = colEl.querySelector('[data-solara-tasks]');
-      const tasks = [];
-      if (tasksContainer) {
-        tasksContainer.querySelectorAll('[data-solara-task]').forEach(taskEl => {
+    // seed state from DOM
+    function seedStateFromDOM() {
+      const state = { columns: {}, tasksById: {}, pendingOps: {} };
+      document.querySelectorAll('[data-solara-column]').forEach(colEl => {
+        const colId = colEl.getAttribute('data-solara-column');
+        const title = colEl.querySelector('[data-solara-title]')?.textContent || colId;
+        const tasks = [];
+        colEl.querySelectorAll('[data-solara-task]').forEach(taskEl => {
           const id = taskEl.getAttribute('data-solara-task');
-          const titleText = taskEl.textContent || id;
-          const t = { id, title: titleText };
+          const t = { id, title: taskEl.textContent || id };
           tasks.push(t);
           state.tasksById[id] = t;
         });
+        state.columns[colId] = { id: colId, title, tasks };
+      });
+      return state;
+    }
+
+    const clientId = localStorage.getItem('solara:clientId') || ('c_' + Math.random().toString(36).slice(2,10));
+    localStorage.setItem('solara:clientId', clientId);
+
+    const rt = new Realtime({ url: wsUrl, onMessage: handleMsg, onOpen: handleOpen, clientId });
+    const sender = new OpSender(pkt => rt.send(pkt));
+
+    const state = seedStateFromDOM();
+
+    function applyOpToState(op) {
+      if (op.type === 'move') {
+        const { taskId, from, to } = op;
+        const task = state.tasksById[taskId];
+        if (!task) return;
+        const src = state.columns[from];
+        const dst = state.columns[to];
+        if (!src || !dst) return;
+        src.tasks = src.tasks.filter(t => t.id !== taskId);
+        dst.tasks.push(task);
+        renderColumns();
       }
-      state.columns[colId] = { id: colId, title, tasks };
-    });
-  }
+    }
 
-  // Immediately seed from DOM and render
-  seedStateFromDOM();
-  renderColumns();
+    function applyOpLocallyAndSend(op) {
+      op.opId = genOpId(clientId);
+      op.clientId = clientId;
+      op.ts = Date.now();
+      state.pendingOps[op.opId] = op;
+      applyOpToState(op);
+      sender.push(op);
+    }
 
-  // return helpful handles
-  return {
-    state,
-    applyOpLocallyAndSend,
-    close: () => { sender.close(); rt.stop(); }
-  };
-}
+    function handleMsg(msg) {
+      if (!msg || !msg.type) return;
+      if (msg.type === 'ops') {
+        (msg.ops || []).forEach(op => {
+          if (op.opId && state.pendingOps[op.opId]) delete state.pendingOps[op.opId];
+          applyOpToState(op);
+        });
+      } else if (msg.type === 'op-ack') {
+        if (msg.opId && state.pendingOps[msg.opId]) delete state.pendingOps[msg.opId];
+      } else if (msg.type === 'snapshot' && msg.state) {
+        Object.assign(state, msg.state);
+        renderColumns();
+      }
+    }
 
-/* End of file */
+    function handleOpen() { sender.flush(); }
+
+    // Render and drag/drop wiring
+    function renderColumns() {
+      document.querySelectorAll('[data-solara-column]').forEach(colEl => {
+        const colId = colEl.getAttribute('data-solara-column');
+        const column = state.columns[colId];
+        const list = colEl.querySelector('[data-solara-tasks]');
+        if (!list || !column) return;
+        list.innerHTML = '';
+        column.tasks.forEach(task => {
+          const el = document.createElement('div');
+          el.className = 'rounded-lg border border-gray-200 bg-white p-2 text-sm cursor-grab';
+          el.setAttribute('draggable', 'true');
+          el.setAttribute('data-solara-task', task.id);
+          el.textContent = task.title || task.id;
+          list.appendChild(el);
+        });
+      });
+      attachDragListeners();
+    }
+
+    function attachDragListeners() {
+      document.querySelectorAll('[data-solara-task]').forEach(el => {
+        el.removeEventListener('dragstart', onDragStart);
+        el.addEventListener('dragstart', onDragStart);
+      });
+      document.querySelectorAll('[data-solara-column]').forEach(col => {
+        col.removeEventListener('dragover', onDragOver);
+        col.removeEventListener('drop', onDrop);
+        col.addEventListener('dragover', onDragOver);
+        col.addEventListener('drop', onDrop);
+      });
+    }
+
+    let _dragTaskId = null;
+    function onDragStart(e) { _dragTaskId = e.target.getAttribute('data-solara-task'); e.dataTransfer?.setData('text/plain', _dragTaskId); }
+    function onDragOver(e) { e.preventDefault(); }
+    function onDrop(e) {
+      e.preventDefault();
+      const colEl = e.currentTarget;
+      const to = colEl.getAttribute('data-solara-column');
+      const taskId = _dragTaskId || e.dataTransfer?.getData('text/plain');
+      if (!taskId || !to) return;
+      const from = Object.keys(state.columns).find(cid => state.columns[cid].tasks.some(t => t.id === taskId));
+      if (!from || from === to) return;
+      const op = { type: 'move', taskId, from, to };
+      applyOpLocallyAndSend(op);
+      _dragTaskId = null;
+    }
+
+    // initial render
+    renderColumns();
+
+    // expose for debugging
+    window.__solara = { state, applyOpLocallyAndSend, rt, sender };
+  </script>
+</body>
+</html>
